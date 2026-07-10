@@ -1,0 +1,18 @@
+let x = 10
+let y = 53
+let z = 53
+let g = 53
+echo g
+echo 50
+g = 5
+y = 10
+y = 12
+y = 14
+y = 16
+y = 18
+echo y
+echo g
+toupper "moii"
+tolower "SIIIS MITÄ VITTUTUA"
+let v = 53
+let l = 53
