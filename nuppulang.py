@@ -193,21 +193,7 @@ def read_input_file(path: str):
     with open(path, "r") as f:
         return f.read()
 
-def main():
-    executable_name = shift(sys.argv)
-
-    if len(sys.argv) < 1:
-        print("Provide input file")
-        sys.exit(1)
-
-    input_file = shift(sys.argv)
-    input_file_contents = read_input_file(input_file)
-
-    tokenizer = Tokenizer(input_file_contents)
-
-    while not tokenizer.is_done():
-        tokenizer.parse_next_statement()
-
+def run_interpreter(tokenizer: Tokenizer):
     tokens = tokenizer.get_tokenized_tokens()
     variables = {}
     for token in tokens:
@@ -223,6 +209,25 @@ def main():
                     print(token.arg.value.lower())
                 case "toupper":
                     print(token.arg.value.upper())
+
+
+
+def main():
+    executable_name = shift(sys.argv)
+
+    if len(sys.argv) < 1:
+        print("Provide input file")
+        sys.exit(1)
+
+    input_file = shift(sys.argv)
+    input_file_contents = read_input_file(input_file)
+
+    tokenizer = Tokenizer(input_file_contents)
+
+    while not tokenizer.is_done():
+        tokenizer.parse_next_statement()
+
+    run_interpreter(tokenizer)
 
 if __name__ == "__main__":
     main()
