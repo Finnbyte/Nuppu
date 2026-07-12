@@ -1,7 +1,7 @@
 import sys
 import time
 
-is_debug = False
+is_debug = True
 
 def shift(lst: list):
     return lst.pop(0)
@@ -127,7 +127,7 @@ class Tokenizer:
     def parse_variable_assignment(self, assignment: VariableAssignment):
         self._consume()
         self._consume()
-        assignment.value = self.parse_expression(self._consume_till_whitespace())
+        assignment.value = self.parse_expression(self._consume_till_char('\n'))
         debug("value for assignment is", assignment.value)
         debug(assignment.name, assignment.value)
         self._tokens.append(assignment)
@@ -145,7 +145,7 @@ class Tokenizer:
             self._spawn_tokenizer_error(self._current_line, "Could not find equals sign")
         self._consume()
         self._consume()
-        declaration.value = self.parse_expression(self._consume_till_whitespace())
+        declaration.value = self.parse_expression(self._consume_till_char('\n'))
         self._tokens.append(declaration)
         self._tokens.append(EndOfStatement())
 
