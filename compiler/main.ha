@@ -108,6 +108,23 @@ fn qbe_compile(intermediary_file_path: str, output_executable_basename: str, rem
 	};
 };
 
+fn run_executable_and_capture_stdout(executable: str) (nomem | os::exec::error | str) = { 
+	const cmd = exec::cmd(executable)?;
+
+        const (read, write) = exec::pipe();
+        exec::addfile(&cmd, os::stdout_file, write)?;
+
+        const proc = exec::start(&cmd)?;
+        io::close(write)?;
+  
+        const data: []u8 = io::drain(read)?;
+        io::close(read)?;
+        exec::wait(&proc)?;
+
+	return strings::fromutf8_unsafe(data);
+};
+
+
 fn shift_args(args_pointer: *[]str) (str | void) = {
 	if (len(*args_pointer) < 1) {
 		return void;
@@ -362,6 +379,17 @@ export fn main() void = {
 		os::exit(1);
 	};
 
+	// flags
+	let enable_execute_flag = false;
+	for (len(args) > 0) {
+		match (shift_args(&args)) {
+		case let arg: str =>
+			if (arg == "-x") enable_execute_flag = true;
+		case void =>
+			yield void;
+		};
+	};
+
 	const (filename, extension) = strings::rcut(input_file as str, ".");
 	if (extension != "nup") {
 		fmt::println("Incorrect input file extension. Expecting '.nup'. Exiting")!;
@@ -404,5 +432,10 @@ export fn main() void = {
 
 	qbe_commit(qbe, intermediary_output_file);
 	qbe_compile(intermediary_output_file_path, filename)!;
+
+	if (enable_execute_flag) {
+		fmt::println("\nOutput:")!;
+		fmt::println(run_executable_and_capture_stdout(filename)!)!;
+	};
 
 };
