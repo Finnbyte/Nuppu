@@ -11,6 +11,8 @@ use regex;
 use strings;
 use os;
 
+const builtins = ["echo", "tolower", "toupper"];
+
 const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z"];
 const datums: []str = ["$a", "$b", "$c", "$d", "$e", "$f", "$g", "$h", "$i", "$j", "$k", "$l", "$m", "$n", "$o", "$p", "$q", "$r", "$s", "$t", "$u", "$v", "$w", "$x", "$y", "$z"];
 
@@ -136,7 +138,7 @@ fn shift_args(args_pointer: *[]str) (str | void) = {
 
 export fn read_file_contents(file_path: str) str = {
 	const file = os::open(file_path)!;
-	const buf: []u8 = alloc([0...], 120)!;
+	const buf: []u8 = alloc([0...], 170)!;
 	io::read(file, buf)!;
 	return strings::fromutf8(buf)!;
 };
@@ -144,7 +146,7 @@ export fn read_file_contents(file_path: str) str = {
 fn init_tokenizer(raw_content: str) Tokenizer = {
 	return Tokenizer {
 		tokens = [],
-		buffer = strings::torunes(raw_content)!
+		buffer = strings::torunes(strings::trim(raw_content))!
 	};
 };
 
@@ -233,8 +235,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 	};
 	
 	// is it variable or number?
-	let is_valid_variable = ascii::isalpha(raw_value_runes[0]);
-	if (is_valid_variable) {
+	if (tokenizer_is_valid_variable(raw_value)) {
 		const identifier = raw_value;
 		const identifier_value = tokenizer_find_variable_value(tokenizer, identifier);
 		if (identifier_value is void) {
@@ -247,11 +248,17 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 		};
 	};
 
+	// it is a number
 	return Expression {
-		kind = ExpressionKind::STR,
+		kind = ExpressionKind::INT,
 		value = strings::toutf8(raw_value),
 		value_size = len(raw_value) * 8
 	};
+};
+
+fn tokenizer_is_valid_variable(identifier: str) bool = {
+	const is_valid_variable = ascii::isalpha(strings::torunes(identifier)![0]);
+	return is_valid_variable;
 };
 
 fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
@@ -286,23 +293,60 @@ fn tokenizer_has_next_statement(tokenizer: Tokenizer) bool = {
 	let newlines_found = 0;
 	let i: size = 0;
 	for (newlines_found <= 1 && i < len(tokenizer.buffer)) {
-		fmt::println(tokenizer.buffer[i])!;
 		if (tokenizer.buffer[i] == '\n') newlines_found += 1;
 		i += 1;
 	};
 	return newlines_found >= 1;
 };
 
-fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
-	const keyword = next_till_whitespace(tokenizer);
-	fmt::println("kw", keyword)!;
+fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void = {
+	next_expect(tokenizer, ' ');
+	next_expect(tokenizer, '=');
+	next_expect(tokenizer, ' ');
 
-	if (keyword == "echo") {
+	const value = match (tokenizer_parse_expression(tokenizer)) {
+	case let expression: Expression => 
+		yield expression;
+	case invalidexpression => 
+		fmt::fatal("Invalid expression encountered");
+	};
+
+	fmt::printfln("{}, {}", identifier, strings::fromutf8(value.value)!)!;
+	append(tokenizer.tokens, VariableToken {
+		name = identifier,
+		value = value,
+		kind = value.kind
+	})!;
+
+
+};
+
+fn tokenizer_is_valid_builtin(keyword: str) bool = {
+	for (const builtin .. builtins) {
+		if (keyword == builtin) return true;
+	};
+	return false;
+};
+
+fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
+	fmt::println("next:", tokenizer.buffer[0])!;
+	const keyword = next_till_whitespace(tokenizer);
+	fmt::println("keyword:", keyword)!;
+	if (strings::trim(keyword) == "") {
+		fmt::println("empty af")!;
+		next(tokenizer);
+		return;
+	};
+
+	if (tokenizer_is_valid_builtin(keyword)) {
 		tokenizer_parse_funcall(tokenizer, keyword);
 	} else if (keyword == "let") {
 		tokenizer_parse_variable_declaration(tokenizer);
 	} else {
-		return;
+		if (tokenizer_is_valid_variable(keyword) && !(tokenizer_find_variable_value(tokenizer, keyword) is void)) {
+			tokenizer_parse_variable_assign(tokenizer, keyword);
+			return;
+		};
 	};
 
 	next(tokenizer);
@@ -310,7 +354,7 @@ fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
 
 fn print_current_tokenizer_buffer(tokenizer: Tokenizer) void = {
 	for (const ch .. tokenizer.buffer) {
-		fmt::println(ch)!;
+		fmt::println("lul", ch)!;
 	};
 };
 
@@ -321,9 +365,15 @@ fn print_tokenizer_tokenized_tokens(tokenizer: Tokenizer) void = {
 };
 
 fn qbe_define_variable(token: VariableToken) str = {
+	switch (token.kind) {
+	case VariableKind::INT =>
+		fmt::println("int")!;
+	case VariableKind::STR =>
+		fmt::println("int")!;
+	};
 	if (token.kind == VariableKind::INT) {
 		for (const u .. token.value.value) {
-			fmt::println(u)!;
+			fmt::println("lol", u)!;
 		};
 		const reg = qbe_get_reg_label();
 		return strings::concat(
