@@ -2,7 +2,7 @@
 
 ## About
 
-juppu is an (very) experimental and basic programming language I'll attempt to build as an experiment since I've recently been enchanted on how compilers work.
+Nuppu is an (very) experimental and basic programming language I'll attempt to build as an experiment since I've recently been enchanted on how compilers work.
 
 It currently contains two "versions". a very, very, very basic interpreter that does succesfully parse and execute a simple scripting language syntax, and (the main focus) a Hare-based compiler.
 
