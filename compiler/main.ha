@@ -264,6 +264,18 @@ fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
 	fmt::printfln("{}, {}", identifier, strings::fromutf8(value.value)!)!;
 };
 
+// Returns whether there are still statements to be tokenized in the source file buffer.
+fn tokenizer_has_next_statement(tokenizer: Tokenizer) bool = {
+	let newlines_found = 0;
+	let i: size = 0;
+	for (newlines_found <= 1 && i < len(tokenizer.buffer)) {
+		fmt::println(tokenizer.buffer[i])!;
+		if (tokenizer.buffer[i] == '\n') newlines_found += 1;
+		i += 1;
+	};
+	return newlines_found >= 1;
+};
+
 fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
 	const keyword = next_till_whitespace(tokenizer);
 	fmt::println("kw", keyword)!;
@@ -364,10 +376,9 @@ export fn main() void = {
 	
 	print_current_tokenizer_buffer(tokenizer);
 
-	tokenizer_parse_statement(&tokenizer);
-	tokenizer_parse_statement(&tokenizer);
-	tokenizer_parse_statement(&tokenizer);
-	tokenizer_parse_statement(&tokenizer);
+	for (tokenizer_has_next_statement(tokenizer)) {
+		tokenizer_parse_statement(&tokenizer);
+	};
 
 	print_current_tokenizer_buffer(tokenizer);
 	print_tokenizer_tokenized_tokens(tokenizer);
