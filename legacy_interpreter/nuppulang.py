@@ -1,7 +1,7 @@
 import sys
 import time
 
-is_debug = True
+is_debug = False
 
 def shift(lst: list):
     return lst.pop(0)
