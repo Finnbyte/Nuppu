@@ -509,16 +509,15 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 				qbe_write(qbe, format("call $__echo_str(l {}0)\n", reg))!;
 			};
 		} else {
-			const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind);
-			let echofmt = "";
-			if (allocation.data_kind == Qbe_AllocationDataKind::INT) {
-				echofmt = "echofmtd";
-			} else if (allocation.data_kind == Qbe_AllocationDataKind::STR) {
-				echofmt = "echofmts";
+			if (token.value.kind == ExpressionKind::INT) {
+				const reg1 = qbe_get_reg_label(false);
+				qbe_write(qbe, format("{} =l copy {}\n", reg1, strings::fromutf8_unsafe(token.value.value)))!;
+				qbe_write(qbe, format("call $__echo_int(l {})\n", reg1))!;
+
+			} else if (token.value.kind == ExpressionKind::STR) {
+				const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind, token.name);
+				qbe_write(qbe, format("call $__echo_str(l {}0)\n", allocation.name))!;
 			};
-			qbe_write(qbe, allocation.text)!;
-			qbe_write(qbe, format("{}0L =l loadl {}0", allocation.name, allocation.name))!;
-			qbe_write(qbe, format("call $printf(l ${}, l {}0L)\n", echofmt, allocation.name))!;
 		};
 	case => 
 		return;
@@ -596,17 +595,12 @@ function $__echo_str(l %X0) {
 	ret
 }
 
-function $__echo_int(l %X0) {
+function $__echo_int(l %x) {
 	@start
-	%X0L =l loadl %X0
-	call $sprintf(l %X0, l $fmtd, w %X0L)
-	call $printf(l $echofmtd, l %X0)
+	call $printf(l $fmtd, l %x)
 	ret
 }
 	""")!;
-
-
-
 
 	qbe_write(&qbe, "export function w $main() {")!;
 	qbe_write(&qbe, "@start")!;
