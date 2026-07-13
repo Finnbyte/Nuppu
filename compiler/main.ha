@@ -1,5 +1,6 @@
 use fmt;
 use errors;
+use math;
 use fs;
 use strconv;
 use ascii;
@@ -11,6 +12,18 @@ use regex;
 use strings;
 use os;
 
+fn get_variable_reg(qbe: Qbe, variable_identifier: str) str = {
+	for (let i: size = 0; i < len(qbe.variables); i += 2 ) {
+		// found variable
+		if (qbe.variables[i] == variable_identifier) {
+			return qbe.variables[i+1];
+		};
+	};
+	return "";
+};
+
+const ALIGNMENT: size = 4;
+
 const builtins = ["echo", "tolower", "toupper"];
 
 const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z"];
@@ -21,12 +34,31 @@ type ExpressionKind = enum {
 	STR
 };
 
+type Qbe_Allocation = struct {
+	name: str,
+	data_sz: size,
+	data: []u8,
+	data_kind: Qbe_AllocationDataKind,
+	text: str
+};
+
+fn pass() void = {
+	return void;
+};
+
+fn unimplemented() void = {
+	fmt::fatal("Not yet implemented");
+};
+
 type invalidexpression = !void;
 
 type VariableKind = ExpressionKind;
 
+type Qbe_AllocationDataKind = ExpressionKind;
+
 type Expression = struct {
 	kind: ExpressionKind,
+	var: (str | void),
 	value: []u8,
 	value_size: size
 };
@@ -56,15 +88,19 @@ type Qbe_WritePositionKind = enum {
 };
 
 type Qbe = struct {
-	buffer: []str
+	buffer: []str,
+	variables: []str
 };
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
 
-fn qbe_get_reg_label() str = {
+fn qbe_get_reg_label(uppercase: bool = false) str = {
 	const reg = registers[0];
 	static delete(registers[0]);
-	return reg;
+	switch (uppercase) {
+	case true => return ascii::strupper(reg)!;
+	case false => return reg;
+	};
 };
 
 fn qbe_get_data_label() str = {
@@ -73,9 +109,11 @@ fn qbe_get_data_label() str = {
 	return datum;
 };
 
-
-
 fn qbe_write(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionKind::APPEND) (void | nomem) = {
+	if (!strings::hassuffix(s, "\n")) {
+		s = strings::concat(s, "\n")!;
+	};
+
 	if (position is int) {
 		insert(qbe.buffer[position as int], s)?;
 	} else {
@@ -223,6 +261,8 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 	const raw_value = next_till_char(tokenizer, '\n');
 	const raw_value_runes = strings::torunes(raw_value)!;
 
+	fmt::println(raw_value)!;
+
 	// is it string literal?
 	if (raw_value_runes[0] == '\"' || raw_value_runes[0] == '\'') {
 		const runes_without_quotes = raw_value_runes[1..len(raw_value_runes)-1];
@@ -230,11 +270,12 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 		return Expression {
 			kind = ExpressionKind::STR,
 			value = value,
-			value_size = len(value) * 8
+			value_size = len(runes_without_quotes),
+			var = void
 		};
 	};
 	
-	// is it variable or number?
+	// is it variable?
 	if (tokenizer_is_valid_variable(raw_value)) {
 		const identifier = raw_value;
 		const identifier_value = tokenizer_find_variable_value(tokenizer, identifier);
@@ -244,7 +285,8 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 		return Expression {
 			kind = (identifier_value as Expression).kind,
 			value = (identifier_value as Expression).value,
-			value_size = len((identifier_value as Expression).value) * 8
+			value_size = len((identifier_value as Expression).value) * 8,
+			var = identifier
 		};
 	};
 
@@ -252,7 +294,8 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 	return Expression {
 		kind = ExpressionKind::INT,
 		value = strings::toutf8(raw_value),
-		value_size = len(raw_value) * 8
+		value_size = len(raw_value) * 8,
+		var = void
 	};
 };
 
@@ -317,8 +360,6 @@ fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void 
 		value = value,
 		kind = value.kind
 	})!;
-
-
 };
 
 fn tokenizer_is_valid_builtin(keyword: str) bool = {
@@ -329,11 +370,10 @@ fn tokenizer_is_valid_builtin(keyword: str) bool = {
 };
 
 fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
-	fmt::println("next:", tokenizer.buffer[0])!;
 	const keyword = next_till_whitespace(tokenizer);
+	fmt::println("next:", tokenizer.buffer[0])!;
 	fmt::println("keyword:", keyword)!;
 	if (strings::trim(keyword) == "") {
-		fmt::println("empty af")!;
 		next(tokenizer);
 		return;
 	};
@@ -352,32 +392,17 @@ fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
 	next(tokenizer);
 };
 
-fn print_current_tokenizer_buffer(tokenizer: Tokenizer) void = {
-	for (const ch .. tokenizer.buffer) {
-		fmt::println("lul", ch)!;
-	};
-};
-
-fn print_tokenizer_tokenized_tokens(tokenizer: Tokenizer) void = {
-	for (const token .. tokenizer.tokens) {
-		fmt::printfln("")!;
-	};
-};
-
 fn qbe_define_variable(token: VariableToken) str = {
 	switch (token.kind) {
 	case VariableKind::INT =>
 		fmt::println("int")!;
 	case VariableKind::STR =>
-		fmt::println("int")!;
+		fmt::println("str")!;
 	};
 	if (token.kind == VariableKind::INT) {
-		for (const u .. token.value.value) {
-			fmt::println("lol", u)!;
-		};
 		const reg = qbe_get_reg_label();
 		return strings::concat(
-			fmt::asprintf("{} =w copy {}\n", reg, strings::fromutf8(token.value.value)!)!
+			fmt::asprintf("{} =w copy {}", reg, strings::fromutf8(token.value.value)!)!
 		)!;
 	};
 	return "";
@@ -395,29 +420,115 @@ fn qbe_commit(qbe: Qbe, file: io::file) void = {
 	io::write(file, bytes)!;
 };
 
-fn qbe_define_data(data_label: str, data: str) str = {
-	return fmt::asprintf("data {} = {}", data_label, data)!;
+fn qbe_define_data(data_label: str, expression: Expression) str = {
+	const value = strings::fromutf8_unsafe(expression.value);
+	switch (expression.kind) {
+	case ExpressionKind::INT =>
+		return fmt::asprintf("data {} = {{ w {} }}\n", data_label, value)!;
+	case ExpressionKind::STR =>
+		return fmt::asprintf("data {} = {{ b \"{}\" }}\n", data_label, value)!;
+	};
+};
+
+// shorthand to fmt::asprintf that automatically crashes program if fails.
+fn format(fmt: str, args: fmt::field...) str = {
+	return strings::concat(fmt::asprintf(fmt, args...)!)!;
+};
+
+// shorthand to strings::join that automatically crashes program if fails.
+fn join(strs: []str, delim: str = "") str = {
+	return strings::join(delim, strs...)!;
+};
+
+fn qbe_define_expression(data_label: str, expression: Expression) str = {
+	const value = strings::fromutf8_unsafe(expression.value);
+	switch (expression.kind) {
+	case ExpressionKind::INT =>
+		return fmt::asprintf("w {}", data_label)!;
+	case ExpressionKind::STR =>
+		return fmt::asprintf("l {}", data_label)!;
+	};
 };
 
 fn qbe_define_funcall(name: str, args: str) str = {
 	return strings::concat("call ", name, "(", args, ")", "\n")!;
 };
 
+// fn qbe_define_store(reg: str, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind) str = {
+// 	const elems = data_sz / ALIGNMENT;
+// 	if (elems == 1 && data_kind = Qbe_AllocationDataKind::INT) {
+// 		append(out, format("storel {}, ,", reg))!;
+// 	} else if (elems > 1 && data_kind = Qbe_AllocationDataKind::STR) {
+// 		append(out, format("storel {}, ,", reg))!;
+// 	};
+// };
+
+fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
+	let out: []str = [];
+	const reg = qbe_get_reg_label();
+	fmt::println(data_sz)!;
+	append(out, format("{}0 =l alloc4 8", reg))!;
+	if (data_sz > 1 && data_kind == Qbe_AllocationDataKind::STR) {
+		append(out, format("storel {}, {}0", data[0], reg))!;
+		for (let i: size = 1; i < data_sz; i += 1) {
+			const byte = data[i];
+			const element_reg = format("{}{}", reg, i);
+			append(out, format("{} =l add {}{}, 1", element_reg, reg, i-1))!;
+			append(out, format("storew {}, {}", byte, element_reg))!;
+		};
+	} else {
+		append(out, format("storel {}, {}0", strings::fromutf8_unsafe(data), reg))!;
+	};
+
+	if (data_identifier is str) {
+		append(qbe.variables, data_identifier as str)!;
+		append(qbe.variables, reg)!;
+	};
+
+	return Qbe_Allocation {
+		name = reg,
+		data_sz = data_sz,
+		data = data,
+		data_kind = data_kind,
+		text = join(out, "\n")
+	};
+};
+
 fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	switch (token.name) {
 	case "echo" =>
-		const label = qbe_get_data_label();
-		qbe_write(
-			qbe, 
-			qbe_define_data(label, fmt::asprintf("{{ b \"{}\\n\", b 0 }}\n", strings::fromutf8_unsafe(token.value.value))!), 
-			Qbe_WritePositionKind::PREPEND)!;
-		qbe_write(
-			qbe, 
-			qbe_define_funcall("$printf", strings::concat("l ", label)!))!;
+		// write different printf depending of if echoing a variable
+		if (token.value.var is str) {
+			const var = token.value.var as str;
+			const reg = get_variable_reg(*qbe, var);
+			if (token.value.kind == ExpressionKind::INT) {
+				const reg1 = qbe_get_reg_label(true);
+				qbe_write(qbe, format("{} =l $___itoa(l {})\n", reg1, reg))!;
+				qbe_write(qbe, format("call $__echo_int(l {})\n", reg1))!;
+			} else if (token.value.kind == ExpressionKind::STR) {
+				qbe_write(qbe, format("call $__echo_str(l {}0)\n", reg))!;
+			};
+		} else {
+			const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind);
+			let echofmt = "";
+			if (allocation.data_kind == Qbe_AllocationDataKind::INT) {
+				echofmt = "echofmtd";
+			} else if (allocation.data_kind == Qbe_AllocationDataKind::STR) {
+				echofmt = "echofmts";
+			};
+			qbe_write(qbe, allocation.text)!;
+			qbe_write(qbe, format("{}0L =l loadl {}0", allocation.name, allocation.name))!;
+			qbe_write(qbe, format("call $printf(l ${}, l {}0L)\n", echofmt, allocation.name))!;
+		};
 	case => 
 		return;
 
 	};
+};
+
+fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
+	const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind, token.name);
+	qbe_write(qbe, allocation.text)!;
 };
 
 export fn main() void = {
@@ -452,31 +563,64 @@ export fn main() void = {
 
 	const tokenizer = init_tokenizer(nup_file_contents);
 	
-	print_current_tokenizer_buffer(tokenizer);
-
 	for (tokenizer_has_next_statement(tokenizer)) {
 		tokenizer_parse_statement(&tokenizer);
 	};
 
-	print_current_tokenizer_buffer(tokenizer);
-	print_tokenizer_tokenized_tokens(tokenizer);
-
 	const qbe = Qbe {
 		buffer = [],
+		variables = []
 	};
 
-	qbe_write(&qbe, "export function w $main() {\n")!;
-	qbe_write(&qbe, "@start\n")!;
+	// datas
+	qbe_write(&qbe, "data $echofmts = { b \"%s\\n\", b 0 }")!;
+	qbe_write(&qbe, "data $echofmtd = { b \"%d\\n\", b 0 }")!;
+	qbe_write(&qbe, "data $fmtd = { b \"%d\", b 0 }")!;
+	qbe_write(&qbe, "data $fmts = { b \"%s\", b 0 }")!;
+
+	// util functions
+	qbe_write(&qbe, """
+function l $___itoa(l %X0) {
+@start
+	%X0L =l loadl %X0
+	call $sprintf(l %X0, l $fmtd, l %X0)
+	ret %X0L
+}
+""")!;
+
+	// builtin functions
+	qbe_write(&qbe, """
+function $__echo_str(l %X0) {
+	@start
+	call $printf(l $echofmts, l %X0)
+	ret
+}
+
+function $__echo_int(l %X0) {
+	@start
+	%X0L =l loadl %X0
+	call $sprintf(l %X0, l $fmtd, w %X0L)
+	call $printf(l $echofmtd, l %X0)
+	ret
+}
+	""")!;
+
+
+
+
+	qbe_write(&qbe, "export function w $main() {")!;
+	qbe_write(&qbe, "@start")!;
 
 	for (const token .. tokenizer.tokens) {
 		if (token is FuncallToken) {
 			qbe_write_funcall(&qbe, token as FuncallToken);
+			pass();
 		} else if (token is VariableToken) {
-			qbe_write(&qbe, qbe_define_variable(token as VariableToken))!;
+			qbe_write_variable(&qbe, token as VariableToken);
 		};
 	};
-	qbe_write(&qbe, "ret 0\n")!;
-	qbe_write(&qbe, "}\n")!;
+	qbe_write(&qbe, "ret 0")!;
+	qbe_write(&qbe, "}")!;
 
 	fmt::println(read_file_contents(intermediary_output_file_path))!;
 
