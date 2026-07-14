@@ -471,23 +471,24 @@ fn qbe_define_funcall(name: str, args: str) str = {
 // };
 //
 //
+
 fn itoa(num: (size | int)) str = {
 	return format("{}", num);
 };
 
-fn figure_malloc_size(data_sz: size, data_kind: Qbe_AllocationDataKind) str = {
-	switch (data_kind) {
-	case Qbe_AllocationDataKind::STR =>
-		return itoa(data_sz * 2);
-	case Qbe_AllocationDataKind::INT =>
-		return "100";
-	};
-};
+// fn figure_malloc_size(data_sz: size, data_kind: Qbe_AllocationDataKind) str = {
+// 	switch (data_kind) {
+// 	case Qbe_AllocationDataKind::STR =>
+// 		return itoa(data_sz * 2);
+// 	case Qbe_AllocationDataKind::INT =>
+// 		return "100";
+// 	};
+// };
 
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
 	let out: []str = [];
 	const reg = qbe_get_reg_label(true);
-	append(out, format("{}0 =l call $malloc(w {})", reg, figure_malloc_size(data_sz, data_kind)))!;
+	append(out, format("{}0 =l alloc8 {}", reg, data_sz))!;
 	if (data_sz > 1 && data_kind == Qbe_AllocationDataKind::STR) {
 		append(out, format("storel {}, {}0", data[0], reg))!;
 		for (let i: size = 1; i < data_sz; i += 1) {
