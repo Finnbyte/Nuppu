@@ -49,6 +49,17 @@ type Qbe_Allocation = struct {
 	text: str
 };
 
+type Qbe_Integer = struct {
+	name: str,
+	data: []u8,
+	text: str
+};
+
+type Qbe_Blit = struct {
+	name: str,
+	text: str
+};
+
 fn pass() void = {
 	return void;
 };
@@ -146,10 +157,10 @@ fn qbe_write(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionK
 	};
 };
 
-fn qbe_writef(file: io::file, format: str, args: fmt::field...) (void | io::error) = {
-	const s = fmt::asprintf(format, args...)!;
-	io::write(file, strings::toutf8(s))!;
-};
+// fn qbe_writef(file: io::file, format: str, args: fmt::field...) (void | io::error) = {
+// 	const s = fmt::asprintf(format, args...)!;
+// 	io::write(file, strings::toutf8(s))!;
+// };
 
 fn qbe_compile(intermediary_file_path: str, output_executable_basename: str, remove_assembly_file: bool = true) (void | nomem | os::exec::error) = {
 	const assembly_file_path = strings::concat(output_executable_basename, ".s")?;
@@ -532,6 +543,29 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Al
 	};
 };
 
+fn qbe_define_literal_integer(data: []u8) Qbe_Integer = {
+	const reg = qbe_get_reg_label();
+	const text = format("{} =l copy {}\n", reg, strings::fromutf8_unsafe(data));
+	return Qbe_Integer {
+		name = reg,
+		data = data,
+		text = text
+	};
+};
+
+fn qbe_define_blit(src_reg: str, bytes_amount: size) Qbe_Blit = {
+	const dest_reg = qbe_get_reg_label(true);
+
+	const text = format("""
+{}0 =l alloc8 {}
+blit {}0, {}0, {}
+""", dest_reg, bytes_amount, src_reg, dest_reg, bytes_amount);
+	return Qbe_Blit {
+		name = dest_reg,
+		text = text
+	};
+};
+
 fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	switch (token.name) {
 	case "echo" =>
@@ -540,17 +574,18 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 			const var = token.value.var as str;
 			const reg = get_variable_reg(*qbe, var);
 			if (token.value.kind == ExpressionKind::INT) {
-				const reg1 = qbe_get_reg_label(true);
-				qbe_write(qbe, format("{} =l call $___itoa(l {}0)\n", reg1, reg))!;
-				qbe_write(qbe, format("call $__echo_str(l {})\n", reg1))!;
+				const blit = qbe_define_blit(reg, token.value.value_size);
+				qbe_write(qbe, blit.text)!;
+				qbe_write(qbe, format("{} =l call $___itoa(l {}0)\n", blit.name, blit.name))!;
+				qbe_write(qbe, format("call $__echo_str(l {})\n", blit.name))!;
 			} else if (token.value.kind == ExpressionKind::STR) {
 				qbe_write(qbe, format("call $__echo_str(l {}0)\n", reg))!;
 			};
 		} else {
 			if (token.value.kind == ExpressionKind::INT) {
-				const reg1 = qbe_get_reg_label(false);
-				qbe_write(qbe, format("{} =l copy {}\n", reg1, strings::fromutf8_unsafe(token.value.value)))!;
-				qbe_write(qbe, format("call $__echo_int(l {})\n", reg1))!;
+				const integer = qbe_define_literal_integer(token.value.value);
+				qbe_write(qbe, integer.text)!;
+				qbe_write(qbe, format("call $__echo_int(l {})\n", integer.name))!;
 
 			} else if (token.value.kind == ExpressionKind::STR) {
 				const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind, token.name);
