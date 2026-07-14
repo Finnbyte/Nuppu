@@ -1,0 +1,23 @@
+data $echofmts = { b "%s\n", b 0 }
+data $echofmtd = { b "%d\n", b 0 }
+data $fmtd = { b "%d", b 0 }
+data $fmts = { b "%s", b 0 }
+
+function l $___itoa(l %X0) {
+	@start
+		%X0L =l loadl %X0
+		call $sprintf(l %X0, l $fmtd, l %X0L)
+		ret %X0
+}
+
+function $__echo_str(l %X0) {
+	@start
+		call $printf(l $echofmts, l %X0)
+		ret
+}
+
+function $__echo_int(l %x) {
+	@start
+		call $printf(l $fmtd, l %x)
+		ret
+}

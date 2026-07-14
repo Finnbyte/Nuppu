@@ -101,6 +101,19 @@ type Qbe = struct {
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
 
+fn qbe_initialize(base_file_path: str) Qbe = {
+	const base_contents = read_file_contents(base_file_path, false);
+	const lines = strings::split(base_contents, "\n")!;
+	const qbe = Qbe {
+		buffer = [],
+		variables = []
+	};
+	for (const line .. lines) {
+		qbe_write(&qbe, line)!;
+	};
+	return qbe;
+};
+
 fn qbe_get_reg_label(uppercase: bool = false) str = {
 	const reg = registers[0];
 	static delete(registers[0]);
@@ -181,10 +194,14 @@ fn shift_args(args_pointer: *[]str) (str | void) = {
 	return temp;
 };
 
-export fn read_file_contents(file_path: str) str = {
+export fn read_file_contents(file_path: str, include_null_terminator: bool = true) str = {
 	const file = os::open(file_path)!;
-	const buf: []u8 = alloc([0...], 170)!;
+	const stat = os::fstat(file)!;
+	let buf_sz = stat.sz;
+	if (include_null_terminator) buf_sz += 1;
+	const buf: []u8 = alloc([0...], buf_sz)!;
 	io::read(file, buf)!;
+	defer io::close(file)!;
 	return strings::fromutf8(buf)!;
 };
 
@@ -268,8 +285,6 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 	const raw_value = next_till_char(tokenizer, '\n');
 	const raw_value_runes = strings::torunes(raw_value)!;
 
-	fmt::println(raw_value)!;
-
 	// is it string literal?
 	if (raw_value_runes[0] == '\"' || raw_value_runes[0] == '\'') {
 		const runes_without_quotes = raw_value_runes[1..len(raw_value_runes)-1];
@@ -312,8 +327,6 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 };
 
 fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
-	fmt::println("parse decl")!;
-
 	next_expect(tokenizer, ' ');
 
 	const identifier = next_till_whitespace(tokenizer);
@@ -399,21 +412,22 @@ fn tokenizer_parse_statement(tokenizer: *Tokenizer) void = {
 	next(tokenizer);
 };
 
-fn qbe_define_variable(token: VariableToken) str = {
-	switch (token.kind) {
-	case VariableKind::INT =>
-		fmt::println("int")!;
-	case VariableKind::STR =>
-		fmt::println("str")!;
-	};
-	if (token.kind == VariableKind::INT) {
-		const reg = qbe_get_reg_label();
-		return strings::concat(
-			fmt::asprintf("{} =w copy {}", reg, strings::fromutf8(token.value.value)!)!
-		)!;
-	};
-	return "";
-};
+// fn qbe_define_variable(token: VariableToken) str = {
+// 	switch (token.kind) {
+// 	case VariableKind::INT =>
+// 		fmt::println("int")!;
+// 	case VariableKind::STR =>
+// 		fmt::println("str")!;
+// 	};
+// 	if (token.kind == VariableKind::INT) {
+// 		const reg = qbe_get_reg_label();
+// 		return strings::concat(
+// 			fmt::asprintf("{} =w copy {}", reg, strings::fromutf8(token.value.value)!)!
+// 		)!;
+// 	};
+// 	return "";
+// };
+
 fn qbe_commit(qbe: Qbe, file: io::file) void = {
 	for (const line .. qbe.buffer) {
 		fmt::print(line)!;
@@ -476,19 +490,20 @@ fn itoa(num: (size | int)) str = {
 	return format("{}", num);
 };
 
-// fn figure_malloc_size(data_sz: size, data_kind: Qbe_AllocationDataKind) str = {
-// 	switch (data_kind) {
-// 	case Qbe_AllocationDataKind::STR =>
-// 		return itoa(data_sz * 2);
-// 	case Qbe_AllocationDataKind::INT =>
-// 		return "100";
-// 	};
-// };
+fn figure_malloc_size(data_sz: size, data_kind: Qbe_AllocationDataKind) str = {
+	switch (data_kind) {
+	case Qbe_AllocationDataKind::STR =>
+		return itoa(data_sz * 2);
+	case Qbe_AllocationDataKind::INT =>
+		return "8";
+	};
+};
+
 
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
 	let out: []str = [];
 	const reg = qbe_get_reg_label(true);
-	append(out, format("{}0 =l alloc8 {}", reg, data_sz))!;
+	append(out, format("{}0 =l alloc8 {}", reg, figure_malloc_size(data_sz, data_kind)))!;
 	if (data_sz > 1 && data_kind == Qbe_AllocationDataKind::STR) {
 		append(out, format("storel {}, {}0", data[0], reg))!;
 		for (let i: size = 1; i < data_sz; i += 1) {
@@ -589,41 +604,8 @@ export fn main() void = {
 		tokenizer_parse_statement(&tokenizer);
 	};
 
-	const qbe = Qbe {
-		buffer = [],
-		variables = []
-	};
 
-	// datas
-	qbe_write(&qbe, "data $echofmts = { b \"%s\\n\", b 0 }")!;
-	qbe_write(&qbe, "data $echofmtd = { b \"%d\\n\", b 0 }")!;
-	qbe_write(&qbe, "data $fmtd = { b \"%d\", b 0 }")!;
-	qbe_write(&qbe, "data $fmts = { b \"%s\", b 0 }")!;
-
-	// util functions
-	qbe_write(&qbe, """
-function l $___itoa(l %X0) {
-@start
-	%X0L =l loadl %X0
-	call $sprintf(l %X0, l $fmtd, l %X0L)
-	ret %X0
-}
-""")!;
-
-	// builtin functions
-	qbe_write(&qbe, """
-function $__echo_str(l %X0) {
-	@start
-	call $printf(l $echofmts, l %X0)
-	ret
-}
-
-function $__echo_int(l %x) {
-	@start
-	call $printf(l $fmtd, l %x)
-	ret
-}
-	""")!;
+	const qbe = qbe_initialize("./base.qbe");
 
 	qbe_write(&qbe, "export function w $main() {")!;
 	qbe_write(&qbe, "@start")!;
@@ -635,16 +617,9 @@ function $__echo_int(l %x) {
 		} else if (token is VariableToken) {
 			qbe_write_variable(&qbe, token as VariableToken);
 		};
-
-		for (const var .. qbe.variables) {
-			const (x, y) = var;
-			fmt::println("ts", x, y)!;
-		};
 	};
 	qbe_write(&qbe, "ret 0")!;
 	qbe_write(&qbe, "}")!;
-
-	fmt::println(read_file_contents(intermediary_output_file_path))!;
 
 	qbe_commit(qbe, intermediary_output_file);
 	qbe_compile(intermediary_output_file_path, filename)!;
