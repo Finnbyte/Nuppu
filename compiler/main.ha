@@ -97,7 +97,8 @@ type VariableToken = struct {
 
 type Tokenizer = struct {
 	tokens: []Token,
-	buffer: []rune
+	buffer: []rune,
+	linenum: int,
 };
 
 type Qbe_WritePositionKind = enum {
@@ -259,6 +260,7 @@ fn next_till_char(tokenizer: *Tokenizer, char: rune) str = {
 
 
 fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
+	next_expect(tokenizer, '(');
 	next_expect(tokenizer, ' ');
 
 	const value = match (tokenizer_parse_expression(tokenizer)) {
@@ -267,6 +269,8 @@ fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 	case invalidexpression => 
 		fmt::fatal("Invalid expression encountered");
 	};
+
+	next_expect(tokenizer, ')');
 
 	append(tokenizer.tokens, FuncallToken {
 		name = func_name,
