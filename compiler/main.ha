@@ -12,13 +12,20 @@ use regex;
 use strings;
 use os;
 
+// [1, 2, 3, 4, 5, 6]
+
 fn get_variable_reg(qbe: Qbe, variable_identifier: str) str = {
-	for (let i: size = 0; i < len(qbe.variables); i += 2 ) {
+	fmt::println("to find", variable_identifier)!;
+	for (let i: size = len(qbe.variables) - 1; i >= 0; i -= 1 ) {
 		// found variable
-		if (qbe.variables[i] == variable_identifier) {
-			return qbe.variables[i+1];
+		const (identifier, reg) = qbe.variables[i];
+		fmt::printfln("Identifier: {}, reg: {} (searching for {}", identifier, reg, variable_identifier)!;
+		if (identifier == variable_identifier) {
+			fmt::printfln("found!")!;
+			return reg;
 		};
 	};
+	fmt::printfln("didn't find!")!;
 	return "";
 };
 
@@ -89,7 +96,7 @@ type Qbe_WritePositionKind = enum {
 
 type Qbe = struct {
 	buffer: []str,
-	variables: []str
+	variables: [](str, str)
 };
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
@@ -462,12 +469,25 @@ fn qbe_define_funcall(name: str, args: str) str = {
 // 		append(out, format("storel {}, ,", reg))!;
 // 	};
 // };
+//
+//
+fn itoa(num: (size | int)) str = {
+	return format("{}", num);
+};
+
+fn figure_malloc_size(data_sz: size, data_kind: Qbe_AllocationDataKind) str = {
+	switch (data_kind) {
+	case Qbe_AllocationDataKind::STR =>
+		return itoa(data_sz * 2);
+	case Qbe_AllocationDataKind::INT =>
+		return "100";
+	};
+};
 
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
 	let out: []str = [];
-	const reg = qbe_get_reg_label();
-	fmt::println(data_sz)!;
-	append(out, format("{}0 =l alloc4 8", reg))!;
+	const reg = qbe_get_reg_label(true);
+	append(out, format("{}0 =l call $malloc(w {})", reg, figure_malloc_size(data_sz, data_kind)))!;
 	if (data_sz > 1 && data_kind == Qbe_AllocationDataKind::STR) {
 		append(out, format("storel {}, {}0", data[0], reg))!;
 		for (let i: size = 1; i < data_sz; i += 1) {
@@ -481,9 +501,11 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Al
 	};
 
 	if (data_identifier is str) {
-		append(qbe.variables, data_identifier as str)!;
-		append(qbe.variables, reg)!;
+		append(qbe.variables, (data_identifier as str, reg))!;
 	};
+
+	// separate allocations for cleaner .ssa content
+	append(out, "\n")!;
 
 	return Qbe_Allocation {
 		name = reg,
@@ -503,8 +525,8 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 			const reg = get_variable_reg(*qbe, var);
 			if (token.value.kind == ExpressionKind::INT) {
 				const reg1 = qbe_get_reg_label(true);
-				qbe_write(qbe, format("{} =l $___itoa(l {})\n", reg1, reg))!;
-				qbe_write(qbe, format("call $__echo_int(l {})\n", reg1))!;
+				qbe_write(qbe, format("{} =l call $___itoa(l {}0)\n", reg1, reg))!;
+				qbe_write(qbe, format("call $__echo_str(l {})\n", reg1))!;
 			} else if (token.value.kind == ExpressionKind::STR) {
 				qbe_write(qbe, format("call $__echo_str(l {}0)\n", reg))!;
 			};
@@ -582,8 +604,8 @@ export fn main() void = {
 function l $___itoa(l %X0) {
 @start
 	%X0L =l loadl %X0
-	call $sprintf(l %X0, l $fmtd, l %X0)
-	ret %X0L
+	call $sprintf(l %X0, l $fmtd, l %X0L)
+	ret %X0
 }
 """)!;
 
@@ -611,6 +633,11 @@ function $__echo_int(l %x) {
 			pass();
 		} else if (token is VariableToken) {
 			qbe_write_variable(&qbe, token as VariableToken);
+		};
+
+		for (const var .. qbe.variables) {
+			const (x, y) = var;
+			fmt::println("ts", x, y)!;
 		};
 	};
 	qbe_write(&qbe, "ret 0")!;
