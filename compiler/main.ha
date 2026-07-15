@@ -583,6 +583,11 @@ fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
 				tokenizer_parse_variable_assign(tokenizer, keyword);
 			};
 		};
+
+		// increment internal linenum counter if was new line
+		if (peek_next(tokenizer).kind == LexKind::NEWLINE) {
+			tokenizer.linenum += 1;
+		};
 	};
 };
 
