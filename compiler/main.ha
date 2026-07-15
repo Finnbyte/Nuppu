@@ -476,7 +476,7 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
 	next_expect(tokenizer, ' ');
 
-	const identifier = next_till_whitespace(tokenizer);
+	const identifier = next_till_nonchar(tokenizer);
 	fmt::println("Identifier:", identifier)!;
 
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
