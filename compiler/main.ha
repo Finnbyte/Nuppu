@@ -278,6 +278,13 @@ export fn read_file_contents(file_path: str, include_null_terminator: bool = tru
 	return strings::fromutf8(buf)!;
 };
 
+fn valid_integer(s: str) bool = {
+	for (const ch .. strings::torunes(s)!) {
+		if (!ascii::isdigit(ch)) return false;
+	};
+	return true;
+};
+
 fn init_tokenizer(raw_content: str, lexer: Lexer) Tokenizer = {
 	return Tokenizer {
 		tokens = [],
@@ -337,6 +344,16 @@ fn next_till_whitespace(tokenizer: *Tokenizer) str = {
 fn next_till_char(tokenizer: *Tokenizer, char: rune) str = {
 	const buf: []rune = [];
 	for (tokenizer.buffer[0].value != char) {
+		const c: rune = tokenizer.buffer[0].value;
+		append(buf, c)!;
+		delete(tokenizer.buffer[0]);
+	};
+	return strings::fromrunes(buf)!;
+};
+
+fn next_till_nonchar_or_nondigit(tokenizer: *Tokenizer) str = {
+	const buf: []rune = [];
+	for (tokenizer.buffer[0].kind == LexKind::CHAR || tokenizer.buffer[0].kind == LexKind::DIGIT) {
 		const c: rune = tokenizer.buffer[0].value;
 		append(buf, c)!;
 		delete(tokenizer.buffer[0]);
@@ -416,9 +433,22 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 			var = void
 		};
 	};
-	
+
+
+	// is it a number literal?
+	const raw_value = next_till_nonchar_or_nondigit(tokenizer);
+	if (valid_integer(raw_value)) {
+		return Expression {
+			kind = ExpressionKind::INT,
+			value = strings::toutf8(raw_value),
+			value_size = len(raw_value) * 8,
+			var = void
+		};
+
+
+	};
+
 	// is it variable?
-	const raw_value = next_till_nonchar(tokenizer);
 	if (tokenizer_is_valid_variable(raw_value)) {
 		fmt::println("parse_expression - is variable")!;
 		const identifier = raw_value;
@@ -434,13 +464,8 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 		};
 	};
 
-	// it is a number
-	return Expression {
-		kind = ExpressionKind::INT,
-		value = strings::toutf8(raw_value),
-		value_size = len(raw_value) * 8,
-		var = void
-	};
+	return invalidexpression;
+
 };
 
 fn tokenizer_is_valid_variable(identifier: str) bool = {
@@ -543,7 +568,7 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
 	const symbols = tokenizer.buffer;
 	const symbols_count = len(tokenizer.buffer);
-	for (symbols_count > 0) {
+	for (tokenizer_has_next_statement(*tokenizer)) {
 		fmt::println("pre: ", peek_next(tokenizer).value)!;
 		const keyword = next_till_nonchar(tokenizer);
 		fmt::println("post: ", peek_next(tokenizer).value)!;
@@ -800,13 +825,18 @@ export fn main() void = {
 		buffer = strings::torunes(strings::trim(nup_file_contents))!,
 	};
 	
+	// Lex the buffer, saving the lexed symbols into the Lexer
 	lexer_lex_buffer(&lexer);
+	print_lexed_symbols(lexer); // debug
 
+	// Initialize the tokenizer based on the lexer's accumulated output data buffer
 	const tokenizer = init_tokenizer(nup_file_contents, lexer);
 
+	// Tokenize based on the lexed symbols buffer
 	tokenizer_tokenize(&tokenizer);
-	print_lexed_symbols(lexer);
 
+	// Initialize qbe struct and prefill the buffer with base utilities and
+	// functions
 	const qbe = qbe_initialize("./base.qbe");
 
 	qbe_write(&qbe, "export function w $main() {")!;
@@ -815,7 +845,6 @@ export fn main() void = {
 	for (const token .. tokenizer.tokens) {
 		if (token is FuncallToken) {
 			qbe_write_funcall(&qbe, token as FuncallToken);
-			pass();
 		} else if (token is VariableToken) {
 			qbe_write_variable(&qbe, token as VariableToken);
 		};
