@@ -1,4 +1,5 @@
 use fmt;
+use uuid;
 use errors;
 use math;
 use fs;
@@ -171,6 +172,10 @@ type Qbe = struct {
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
 
+fn gen_id() uuid::uuid = {
+	return uuid::generate();
+};
+
 fn qbe_initialize(base_file_path: str) Qbe = {
 	const base_contents = read_file_contents(base_file_path, false);
 	const lines = strings::split(base_contents, "\n")!;
@@ -299,6 +304,7 @@ fn next(tokenizer: *Tokenizer) LexSymbol = {
 	delete(tokenizer.buffer[0]);
 	return symbol;
 };
+
 fn next_lexer(lexer: *Lexer) LexSymbol = {
 	const ch = lexer.buffer[0];
 	delete(lexer.buffer[0]);
@@ -319,10 +325,20 @@ fn next_expect_lexer(lexer: *Lexer, expected_ch: rune) void = {
 	};
 };
 
-fn next_expect(tokenizer: *Tokenizer, expected_ch: rune, index: size = 0) void = {
-	if (expected_ch != tokenizer.buffer[index].value) {
-		const actual_ch = tokenizer.buffer[index].value;
-		fmt::fatalf("{}: Expected '{}', got '{}'", tokenizer.linenum, expected_ch, actual_ch);
+fn next_expect(tokenizer: *Tokenizer, expected_kind: LexKind, index: size = 0) void = {
+	if (expected_kind != tokenizer.buffer[index].kind) {
+		const actual_kind = tokenizer.buffer[index].kind;
+		fmt::fatalf("{}: Expected '{}', got '{}'", tokenizer.linenum, lexkind_to_rune(expected_kind), lexkind_to_rune(actual_kind));
+	} else {
+		delete(tokenizer.buffer[0]);
+	};
+};
+
+
+fn next_expect_rune(tokenizer: *Tokenizer, expected_rune: rune, index: size = 0) void = {
+	if (expected_rune != tokenizer.buffer[index].value) {
+		const actual_rune = tokenizer.buffer[index].value;
+		fmt::fatalf("{}: Expected '{}', got '{}'", tokenizer.linenum, expected_rune, actual_rune);
 	} else {
 		delete(tokenizer.buffer[0]);
 	};
@@ -388,7 +404,7 @@ fn next_till_nonchar(tokenizer: *Tokenizer) str = {
 
 fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 	fmt::println("HELLO?")!;
-	next_expect(tokenizer, '(');
+	next_expect(tokenizer, LexKind::PAREN_OPEN);
 
 	fmt::println("Next:", peek_next(tokenizer).value)!;
 
@@ -399,7 +415,7 @@ fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 		fmt::fatal("Invalid expression encountered");
 	};
 
-	next_expect(tokenizer, ')');
+	next_expect(tokenizer, LexKind::PAREN_CLOSE);
 
 	append(tokenizer.tokens, FuncallToken {
 		name = func_name,
@@ -479,14 +495,14 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 };
 
 fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
-	next_expect(tokenizer, ' ');
+	next_expect(tokenizer, LexKind::WHITESPACE);
 
 	const identifier = next_till_nonchar(tokenizer);
 	fmt::println("Identifier:", identifier)!;
 
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
 
-	next_expect(tokenizer, '=');
+	next_expect(tokenizer, LexKind::EQUALS);
 
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
 
@@ -520,9 +536,9 @@ fn tokenizer_has_next_statement(tokenizer: Tokenizer) bool = {
 };
 
 fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void = {
-	next_expect(tokenizer, ' ');
-	next_expect(tokenizer, '=');
-	next_expect(tokenizer, ' ');
+	next_expect(tokenizer, LexKind::WHITESPACE);
+	next_expect(tokenizer, LexKind::EQUALS);
+	next_expect(tokenizer, LexKind::WHITESPACE);
 
 	const value = match (tokenizer_parse_expression(tokenizer)) {
 	case let expression: Expression => 
@@ -545,6 +561,37 @@ fn tokenizer_is_valid_builtin(keyword: str) bool = {
 	};
 	return false;
 };
+
+// next joka iteraatio
+// katso onko vikat n kirjainta == keyword
+// toista kunnes buffer tyhjä
+
+fn next_till_keyword(tokenizer: *Tokenizer, keyword: str) (str | void) = {
+	const buf: []rune = [];
+	const buffer = tokenizer.buffer;
+	const keyword_runes = strings::torunes(keyword)!;
+	let index = 0z;
+	for (index < (len(buffer) - len(keyword))) {
+		append(buf, next(tokenizer).value)!;
+
+		// has even chance of containing the keyword
+		if (len(buf) >= len(keyword)) {
+			let keyword_i = len(keyword) - 1;
+			let matches = true;
+			for (let i: size = len(buf) - 1; i > len(buf) - len(keyword); i -= 1) {
+				fmt::println("ayo", buf[i], keyword_runes[keyword_i])!;
+				if (buf[i] != keyword_runes[keyword_i]) {
+					matches = false;
+					break;
+				};
+				keyword_i -= 1;
+				if (matches) {
+					return strings::fromrunes(buf)!;
+				};
+			};
+		};
+		};
+		};
 
 fn print_lexed_symbols(lexer: Lexer) void = {
 	for (const symbol .. lexer.symbols) {
@@ -571,10 +618,29 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 };
 
 fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
-	next_expect(tokenizer, ' ');
+	next_expect(tokenizer, LexKind::WHITESPACE);
 
-	const expr1 = next_till_nonchar(tokenizer);
+	const expr1 = next_till_nonchar_or_nondigit(tokenizer);
+
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
+
+	next_expect(tokenizer, LexKind::EQUALS);
+	next_expect(tokenizer, LexKind::EQUALS);
+
+	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
+
+	const expr2 = next_till_nonchar_or_nondigit(tokenizer);
+
+	next_expect(tokenizer, LexKind::WHITESPACE);
+
+	fmt::println("helo if")!;
+
+	// do...
+	next_expect_rune(tokenizer, 'd');
+	next_expect_rune(tokenizer, 'o');
+
+	const block = next_till_keyword(tokenizer, "end");
+	fmt::println("blöck", block)!;
 };
 
 fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
