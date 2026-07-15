@@ -12,9 +12,6 @@ use regex;
 use strings;
 use os;
 
-// [1, 2, 3, 4, 5, 6]
-//
-
 type LexKind = enum {
 	CHAR,
 	PAREN_OPEN,
