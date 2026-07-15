@@ -361,9 +361,17 @@ fn next_till_nonchar_or_nondigit(tokenizer: *Tokenizer) str = {
 	return strings::fromrunes(buf)!;
 };
 
-fn next_till_kind(tokenizer: *Tokenizer, kind: LexKind) str = {
+fn next_till_kind(tokenizer: *Tokenizer, kinds: LexKind...) str = {
+	const x: str = if (kinds[0] == LexKind::CHAR) " " else "lol";
 	const buf: []rune = [];
-	for (tokenizer.buffer[0].kind != kind) {
+	for (len(tokenizer.buffer) > 0) {
+		let should_break = false;
+		for (const kind .. kinds) {
+			if (tokenizer.buffer[0].kind == kind) {
+				should_break = true;
+			};
+		};
+		if (should_break) break;
 		const c: rune = tokenizer.buffer[0].value;
 		append(buf, c)!;
 		delete(tokenizer.buffer[0]);
