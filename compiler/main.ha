@@ -570,6 +570,13 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 	return result;
 };
 
+fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
+	next_expect(tokenizer, ' ');
+
+	const expr1 = next_till_nonchar(tokenizer);
+	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
+};
+
 fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
 	const symbols = tokenizer.buffer;
 	const symbols_count = len(tokenizer.buffer);
@@ -579,10 +586,14 @@ fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
 		fmt::println("post: ", peek_next(tokenizer).value)!;
 		if (len(keyword) == 0) next(tokenizer);
 		fmt::printfln("täs keyword: \"{}\"", keyword)!;
+
+		// Check keyword
 		if (tokenizer_is_valid_builtin(keyword)) {
 			tokenizer_parse_funcall(tokenizer, keyword);
 		} else if (keyword == "let") {
 			tokenizer_parse_variable_declaration(tokenizer);
+		} else if (keyword == "if") {
+			tokenizer_parse_if(tokenizer);
 		} else if (keyword != "") {
 			if (tokenizer_is_valid_variable(keyword) && !(tokenizer_find_variable_value(tokenizer, keyword) is void)) {
 				tokenizer_parse_variable_assign(tokenizer, keyword);
@@ -637,9 +648,6 @@ fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
 // };
 
 fn qbe_commit(qbe: Qbe, file: io::file) void = {
-	for (const line .. qbe.buffer) {
-		fmt::print(line)!;
-	};
 	const bytes: []u8 = [];
 	for (const line .. qbe.buffer) {
 		for (const byte .. strings::toutf8(line)) {
