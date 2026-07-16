@@ -534,7 +534,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 	if (peek_next(tokenizer).kind == LexKind::QUOTE) {
 		next(tokenizer);
 		const value = next_till_kind(tokenizer, LexKind::QUOTE);
-		fmt::println("parse_expression - raw value:", value)!;
+		fmt::println("parse_expression - raw value:", value, "is sized", len(value))!;
 		next(tokenizer);
 		return Expression {
 			kind = ExpressionKind::STR,
@@ -566,7 +566,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 		return Expression {
 			kind = (identifier_value as Expression).kind,
 			value = (identifier_value as Expression).value,
-			value_size = len((identifier_value as Expression).value) * 8,
+			value_size = len((identifier_value as Expression).value),
 			var = identifier
 		};
 	};
@@ -1064,11 +1064,13 @@ fn indent_buf(buf: []str, indent_level: size) void = {
 
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
 	let out: []str = [];
+	fmt::println(data_sz, strings::fromutf8_unsafe(data))!;
 	const reg = qbe_get_reg_label(true);
 	append(out, format("{}0 =l alloc8 {}", reg, figure_malloc_size(data_sz, data_kind)))!;
 	if (data_sz > 1 && data_kind == Qbe_AllocationDataKind::STR) {
 		append(out, format("storel {}, {}0", data[0], reg))!;
 		for (let i: size = 1; i < data_sz; i += 1) {
+			fmt::println(i)!;
 			const byte = data[i];
 			const element_reg = format("{}{}", reg, i);
 			append(out, format("{} =l add {}{}, 1", element_reg, reg, i-1))!;
@@ -1199,11 +1201,15 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		let cmpreg1 = "";
 		let cmpreg2 = "";
 
+		if (expr1alloc.data_kind != expr2alloc.data_kind) {
+			fmt::fatal("TOKENIZER_ERROR: cannot compare data types");
+		};
+
 		if (expr1alloc.data_kind == Qbe_AllocationDataKind::INT) {
 			cmpreg1 = qbe_get_loaded_reg_label(expr1alloc.name, true);
 			qbe_write(qbe, format("{} =l loadl {}0", cmpreg1, expr1alloc.name))!;
 		} else {
-			cmpreg1= format("{}0", expr1alloc.name);
+			cmpreg1 = format("{}0", expr1alloc.name);
 		};
 
 		if (expr2alloc.data_kind == Qbe_AllocationDataKind::INT) {
@@ -1213,7 +1219,13 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 			cmpreg2 = format("{}0", expr2alloc.name);
 		};
 		
-		qbe_write(qbe, format("%eql =l ceql {}, {}", cmpreg1, cmpreg2))!;
+		if (expr1alloc.data_kind == Qbe_AllocationDataKind::STR &&  expr2alloc.data_kind== Qbe_AllocationDataKind::STR) {
+			qbe_write(qbe, format("%equal =l call $strcmp(l {}, l {})", cmpreg1, cmpreg2))!;
+			qbe_write(qbe, format("%eql =l ceql %equal, 0"))!;
+
+		} else {
+			qbe_write(qbe, format("%eql =l ceql {}, {}", cmpreg1, cmpreg2))!;
+		};
 	case =>
 		unimplemented();
 	};
