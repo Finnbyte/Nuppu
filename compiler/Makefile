@@ -3,3 +3,6 @@ nuppuc: main.ha
 
 clean:
 	rm nuppuc *.ssa
+
+install:
+	install -m5 nuppuc /usr/local/bin/nuppuc
