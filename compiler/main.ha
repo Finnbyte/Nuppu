@@ -80,71 +80,6 @@ type LexSymbol = struct {
 	value: rune
 };
 
-fn get_variable_reg(qbe: Qbe, variable_identifier: str) str = {
-	fmt::println("to find", variable_identifier)!;
-	for (let i: size = len(qbe.variables) - 1; i >= 0; i -= 1 ) {
-		// found variable
-		const (identifier, reg) = qbe.variables[i];
-		fmt::printfln("Identifier: {}, reg: {} (searching for {}", identifier, reg, variable_identifier)!;
-		if (identifier == variable_identifier) {
-			fmt::printfln("found!")!;
-			return reg;
-		};
-	};
-	fmt::printfln("didn't find!")!;
-	return "";
-};
-
-const ALIGNMENT: size = 4;
-
-const builtins = ["echo", "tolower", "toupper"];
-
-const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z"];
-const datums: []str = ["$a", "$b", "$c", "$d", "$e", "$f", "$g", "$h", "$i", "$j", "$k", "$l", "$m", "$n", "$o", "$p", "$q", "$r", "$s", "$t", "$u", "$v", "$w", "$x", "$y", "$z"];
-
-type BlockKind = enum {
-	IF,
-	FUN
-};
-
-type ExpressionKind = enum {
-	INT,
-	STR
-};
-
-type Qbe_Allocation = struct {
-	name: str,
-	data_sz: size,
-	data: []u8,
-	data_kind: Qbe_AllocationDataKind,
-	text: str
-};
-
-type Qbe_Integer = struct {
-	name: str,
-	data: []u8,
-	text: str
-};
-
-type Qbe_Blit = struct {
-	name: str,
-	text: str
-};
-
-fn pass() void = {
-	return void;
-};
-
-fn unimplemented() void = {
-	fmt::fatal("Not yet implemented");
-};
-
-type invalidexpression = !void;
-
-type VariableKind = ExpressionKind;
-
-type Qbe_AllocationDataKind = ExpressionKind;
-
 type Expression = struct {
 	kind: ExpressionKind,
 	var: (str | void),
@@ -198,6 +133,72 @@ type Tokenizer = struct {
 
 };
 
+fn get_variable_reg(qbe: Qbe, variable_identifier: str) str = {
+	fmt::println("to find", variable_identifier)!;
+	for (let i: size = len(qbe.variables) - 1; i >= 0; i -= 1 ) {
+		// found variable
+		const (identifier, reg) = qbe.variables[i];
+		fmt::printfln("Identifier: {}, reg: {} (searching for {}", identifier, reg, variable_identifier)!;
+		if (identifier == variable_identifier) {
+			fmt::printfln("found!")!;
+			return reg;
+		};
+	};
+	fmt::printfln("didn't find!")!;
+	return "";
+};
+
+const ALIGNMENT: size = 4;
+
+const builtins = ["echo", "tolower", "toupper"];
+
+const globalTokenizer: Tokenizer = @undefined;
+
+const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z"];
+const datums: []str = ["$a", "$b", "$c", "$d", "$e", "$f", "$g", "$h", "$i", "$j", "$k", "$l", "$m", "$n", "$o", "$p", "$q", "$r", "$s", "$t", "$u", "$v", "$w", "$x", "$y", "$z"];
+
+type BlockKind = enum {
+	IF,
+	FUN
+};
+
+type ExpressionKind = enum {
+	INT,
+	STR
+};
+
+type Qbe_Allocation = struct {
+	name: str,
+	data_sz: size,
+	data: []u8,
+	data_kind: Qbe_AllocationDataKind,
+	text: str
+};
+
+type Qbe_Integer = struct {
+	name: str,
+	data: []u8,
+	text: str
+};
+
+type Qbe_Blit = struct {
+	name: str,
+	text: str
+};
+
+fn pass() void = {
+	return void;
+};
+
+fn unimplemented() void = {
+	fmt::fatal("Not yet implemented");
+};
+
+type invalidexpression = !void;
+
+type VariableKind = ExpressionKind;
+
+type Qbe_AllocationDataKind = ExpressionKind;
 type Lexer = struct {
 	symbols: []LexSymbol,
 	buffer: []rune
@@ -769,17 +770,28 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 };
 
 fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
+	const is_blockwise_tokenizer = !(tokenizer.block is void);
 	const symbols = tokenizer.buffer;
 	const symbols_count = len(tokenizer.buffer);
 	for (tokenizer_has_next_statement(*tokenizer)) {
 		if (tokenizer.block is BlockToken) {
 			fmt::println("TOKENIZING FOR BLOCK TOKEN!")!;
 		};
+
 		fmt::println("pre: ", peek_next(tokenizer).value)!;
 		const keyword = next_till_nonchar(tokenizer);
 		fmt::println("post: ", peek_next(tokenizer).value)!;
 		if (len(keyword) == 0) next(tokenizer);
 		fmt::printfln("täs keyword: \"{}\"", keyword)!;
+
+		// end closes block
+		if (keyword == "end") {
+			// stop iterating buffer when scope ends
+			if (is_blockwise_tokenizer) return;
+
+			// having end in a non-scoped context is disallowed
+			fmt::fatalf("TOKENIZER_ERROR: {}: illegal \"end\" in non-scoped code", globalTokenizer.linenum);
+		};
 
 		// Check keyword
 		if (tokenizer_is_valid_builtin(keyword)) {
@@ -799,7 +811,13 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		// increment internal linenum counter if was new line
 		if (peek_next(tokenizer).kind == LexKind::NEWLINE) {
 			tokenizer.linenum += 1;
+			globalTokenizer.linenum += 1;
 		};
+	};
+
+	// could not find end before buffer ran out
+	if (is_blockwise_tokenizer) {
+		fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block", globalTokenizer.linenum);
 	};
 };
 
@@ -1097,7 +1115,7 @@ export fn main() void = {
 	print_lexed_symbols(lexer); // debug
 
 	// Initialize the tokenizer based on the lexer's accumulated output data buffer
-	const globalTokenizer = init_tokenizer(lexer);
+	globalTokenizer = init_tokenizer(lexer);
 
 	// Parse globally
 	tokenizer_parse_block(&globalTokenizer);
