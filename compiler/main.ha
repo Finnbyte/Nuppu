@@ -41,6 +41,15 @@ fn lexkind_to_rune(kind: LexKind) str = {
 	};
 };
 
+fn token_to_tokenkind(token: Token) str = {
+	match (token) {
+	case VariableToken => return "VariableToken";
+	case IfToken => return "IfToken";
+	case FuncallToken => return "FuncallToken";
+	case FunDefToken => return "FunDefToken";
+	};
+};
+
 fn rune_to_lexkind(ch: rune) LexKind = {
 	switch (ch) {
 	case '(' => return LexKind::PAREN_OPEN;
@@ -58,7 +67,10 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 		if (ascii::isprint(ch)) {
 			return LexKind::CHAR;
 		};
-		fmt::fatal(format("Could not map \"{}\" to a lexkind.", ch));
+		if (ascii::isblank(ch)) {
+			return LexKind::WHITESPACE;
+		};
+		fmt::fatal(format("LEX_ERROR: Could not map \"{}\" to a lexkind.", ch));
 	};
 
 };
@@ -89,6 +101,11 @@ const builtins = ["echo", "tolower", "toupper"];
 
 const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z"];
 const datums: []str = ["$a", "$b", "$c", "$d", "$e", "$f", "$g", "$h", "$i", "$j", "$k", "$l", "$m", "$n", "$o", "$p", "$q", "$r", "$s", "$t", "$u", "$v", "$w", "$x", "$y", "$z"];
+
+type BlockKind = enum {
+	IF,
+	FUN
+};
 
 type ExpressionKind = enum {
 	INT,
@@ -141,7 +158,31 @@ type FuncallToken = struct {
 	value: Expression
 };
 
-type Token = (VariableToken | FuncallToken);
+type BlockToken = struct {
+	kind: BlockKind,
+	id: uuid::uuid,
+	tokens: []Token
+};
+
+type FunDefToken = struct {
+	name: str,
+	proc: FunDefProcToken,
+	body: BlockToken
+};
+
+type FunDefProcToken = struct {
+	name: str,
+};
+
+type IfToken = struct {
+	id: uuid::uuid,
+	expr1: Expression,
+	expr2: Expression,
+	cmp: str,
+	block: BlockToken
+};
+
+type Token = (VariableToken | FuncallToken | IfToken | FunDefToken);
 
 type VariableToken = struct {
 	kind: VariableKind,
@@ -150,9 +191,11 @@ type VariableToken = struct {
 };
 
 type Tokenizer = struct {
+	block: (BlockToken | void),
 	tokens: []Token,
 	buffer: []LexSymbol,
 	linenum: int,
+
 };
 
 type Lexer = struct {
@@ -166,6 +209,7 @@ type Qbe_WritePositionKind = enum {
 };
 
 type Qbe = struct {
+	indent_level: size,
 	buffer: []str,
 	variables: [](str, str)
 };
@@ -180,6 +224,7 @@ fn qbe_initialize(base_file_path: str) Qbe = {
 	const base_contents = read_file_contents(base_file_path, false);
 	const lines = strings::split(base_contents, "\n")!;
 	const qbe = Qbe {
+		indent_level = 0,
 		buffer = [],
 		variables = []
 	};
@@ -204,7 +249,32 @@ fn qbe_get_data_label() str = {
 	return datum;
 };
 
+fn qbe_set_indent(qbe: *Qbe, indent_level: size) void = {
+	qbe.indent_level = indent_level;
+};
+
 fn qbe_write(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionKind::APPEND) (void | nomem) = {
+	if (!strings::hassuffix(s, "\n")) {
+		s = strings::concat(s, "\n")!;
+	};
+
+	if (qbe.indent_level > 0) {
+		s = strings::lpad(s, ' ', len(s) + qbe.indent_level)?;
+	};
+
+	if (position is int) {
+		insert(qbe.buffer[position as int], s)?;
+	} else {
+		switch (position as Qbe_WritePositionKind) {
+		case Qbe_WritePositionKind::PREPEND =>
+			insert(qbe.buffer[0], s)?;
+		case Qbe_WritePositionKind::APPEND =>
+			append(qbe.buffer, s)?;
+		};
+	};
+};
+
+fn qbe_write_noindent(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionKind::APPEND) (void | nomem) = {
 	if (!strings::hassuffix(s, "\n")) {
 		s = strings::concat(s, "\n")!;
 	};
@@ -287,11 +357,12 @@ fn valid_integer(s: str) bool = {
 	return true;
 };
 
-fn init_tokenizer(raw_content: str, lexer: Lexer) Tokenizer = {
+fn init_tokenizer(lexer: Lexer) Tokenizer = {
 	return Tokenizer {
 		tokens = [],
 		buffer = lexer.symbols,
 		linenum = 1,
+		block = void
 	};
 };
 
@@ -416,6 +487,7 @@ fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 	};
 
 	next_expect(tokenizer, LexKind::PAREN_CLOSE);
+	fmt::println("helo bro?", value.value_size)!;
 
 	append(tokenizer.tokens, FuncallToken {
 		name = func_name,
@@ -430,6 +502,7 @@ fn token_is_variable(token: Token) bool = {
 
 fn tokenizer_find_variable_value(tokenizer: *Tokenizer, variable_identifier: str) (void | Expression) = {
 	for (let i = len(tokenizer.tokens) - 1; i >= 0; i -= 1) {
+		fmt::println(i)!;
 		const token = tokenizer.tokens[i];
 		if (token is VariableToken) {
 			fmt::println((token as VariableToken).name, variable_identifier)!;
@@ -447,6 +520,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 		next(tokenizer);
 		const value = next_till_kind(tokenizer, LexKind::QUOTE);
 		fmt::println("parse_expression - raw value:", value)!;
+		next(tokenizer);
 		return Expression {
 			kind = ExpressionKind::STR,
 			value = strings::toutf8(value),
@@ -454,7 +528,6 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 			var = void
 		};
 	};
-
 
 	// is it a number literal?
 	const raw_value = next_till_nonchar_or_nondigit(tokenizer);
@@ -465,8 +538,6 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | invalidexpres
 			value_size = len(raw_value) * 8,
 			var = void
 		};
-
-
 	};
 
 	// is it variable?
@@ -562,10 +633,6 @@ fn tokenizer_is_valid_builtin(keyword: str) bool = {
 	return false;
 };
 
-// next joka iteraatio
-// katso onko vikat n kirjainta == keyword
-// toista kunnes buffer tyhjä
-
 fn next_till_keyword(tokenizer: *Tokenizer, keyword: str) (str | void) = {
 	const buf: []rune = [];
 	const buffer = tokenizer.buffer;
@@ -617,6 +684,23 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 	return result;
 };
 
+fn initiate_block_token(kind: BlockKind) BlockToken = {
+	return BlockToken {
+		kind = kind,
+		id = uuid::generate(),
+		tokens = []
+	};
+};
+
+fn init_blockwise_tokenizer(symbols: []LexSymbol, block: BlockToken) Tokenizer = {
+	return Tokenizer {
+		tokens = [],
+		buffer = symbols[0..],
+		linenum = 1,
+		block = block
+	};
+};
+
 fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 	next_expect(tokenizer, LexKind::WHITESPACE);
 
@@ -639,14 +723,58 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 	next_expect_rune(tokenizer, 'd');
 	next_expect_rune(tokenizer, 'o');
 
-	const block = next_till_keyword(tokenizer, "end");
-	fmt::println("blöck", block)!;
+	const block = initiate_block_token(BlockKind::IF);
+	const tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
+	tokenizer_parse_block(&tokenizer);
 };
 
-fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
+fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
+	next_expect(tokenizer, LexKind::WHITESPACE);
+
+	const fun_name = next_till_nonchar_or_nondigit(tokenizer);
+
+	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
+
+	next_expect(tokenizer, LexKind::PAREN_OPEN);
+	next_expect(tokenizer, LexKind::PAREN_CLOSE);
+
+	next_expect(tokenizer, LexKind::WHITESPACE);
+
+	next_expect_rune(tokenizer, 'i');
+	next_expect_rune(tokenizer, 's');
+
+	next_expect(tokenizer, LexKind::NEWLINE);
+
+	fmt::println("helo fun")!;
+
+	const block = initiate_block_token(BlockKind::FUN);
+	const blockTokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
+	tokenizer_parse_block(&blockTokenizer);
+
+	for (const token .. blockTokenizer.tokens) {
+		fmt::println(token_to_tokenkind(token))!;
+	};
+
+	fmt::println("count", len(blockTokenizer.buffer))!;
+	fmt::println("count", len(blockTokenizer.tokens))!;
+	block.tokens = blockTokenizer.tokens;
+	
+	append(tokenizer.tokens, FunDefToken {
+		name = fun_name,
+		proc = FunDefProcToken {
+			name = fun_name
+		},
+		body = block
+	})!;
+};
+
+fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 	const symbols = tokenizer.buffer;
 	const symbols_count = len(tokenizer.buffer);
 	for (tokenizer_has_next_statement(*tokenizer)) {
+		if (tokenizer.block is BlockToken) {
+			fmt::println("TOKENIZING FOR BLOCK TOKEN!")!;
+		};
 		fmt::println("pre: ", peek_next(tokenizer).value)!;
 		const keyword = next_till_nonchar(tokenizer);
 		fmt::println("post: ", peek_next(tokenizer).value)!;
@@ -656,6 +784,8 @@ fn tokenizer_tokenize(tokenizer: *Tokenizer) void = {
 		// Check keyword
 		if (tokenizer_is_valid_builtin(keyword)) {
 			tokenizer_parse_funcall(tokenizer, keyword);
+		} else if (keyword == "fun") {
+			tokenizer_parse_fun(tokenizer);
 		} else if (keyword == "let") {
 			tokenizer_parse_variable_declaration(tokenizer);
 		} else if (keyword == "if") {
@@ -781,6 +911,21 @@ fn figure_malloc_size(data_sz: size, data_kind: Qbe_AllocationDataKind) str = {
 	};
 };
 
+fn indent(s: str, indent_level: size) str = {
+	if (indent_level > 0) {
+		s = strings::lpad(s, ' ', len(s) + indent_level)!;
+	};
+	return s;
+};
+
+fn indent_buf(buf: []str, indent_level: size) void = {
+	if (indent_level > 0) {
+		for (let i = 0z; i < len(buf); i += 1) {
+			buf[i] = indent(buf[i], indent_level);
+		};
+	};
+};
+
 
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
 	let out: []str = [];
@@ -804,13 +949,17 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Al
 
 	// separate allocations for cleaner .ssa content
 	append(out, "\n")!;
+	indent_buf(out, qbe.indent_level);
+
+	const text = join(out, "\n");
+	fmt::println("alloacrtion text:", text)!;
 
 	return Qbe_Allocation {
 		name = reg,
 		data_sz = data_sz,
 		data = data,
 		data_kind = data_kind,
-		text = join(out, "\n")
+		text = text
 	};
 };
 
@@ -824,16 +973,18 @@ fn qbe_define_literal_integer(data: []u8) Qbe_Integer = {
 	};
 };
 
-fn qbe_define_blit(src_reg: str, bytes_amount: size) Qbe_Blit = {
+fn qbe_define_blit(qbe: *Qbe, src_reg: str, bytes_amount: size) Qbe_Blit = {
 	const dest_reg = qbe_get_reg_label(true);
+	const out: []str = [];
 
-	const text = format("""
-{}0 =l alloc8 {}
-blit {}0, {}0, {}
-""", dest_reg, bytes_amount, src_reg, dest_reg, bytes_amount);
+	append(out, format("{}0 =l alloc8 {}", dest_reg, bytes_amount))!;
+	append(out, format("blit {}0, {}0, {}", src_reg, dest_reg, bytes_amount))!;
+	indent_buf(out, qbe.indent_level);
+
 	return Qbe_Blit {
 		name = dest_reg,
-		text = text
+		text = join(out, "\n")
+
 	};
 };
 
@@ -845,8 +996,8 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 			const var = token.value.var as str;
 			const reg = get_variable_reg(*qbe, var);
 			if (token.value.kind == ExpressionKind::INT) {
-				const blit = qbe_define_blit(reg, token.value.value_size);
-				qbe_write(qbe, blit.text)!;
+				const blit = qbe_define_blit(qbe, reg, token.value.value_size);
+				qbe_write_noindent(qbe, blit.text)!;
 				qbe_write(qbe, format("{} =l call $___itoa(l {}0)\n", blit.name, blit.name))!;
 				qbe_write(qbe, format("call $__echo_str(l {})\n", blit.name))!;
 			} else if (token.value.kind == ExpressionKind::STR) {
@@ -859,7 +1010,9 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 				qbe_write(qbe, format("call $__echo_int(l {})\n", integer.name))!;
 
 			} else if (token.value.kind == ExpressionKind::STR) {
-				const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind, token.name);
+				fmt::println("alloca")!;
+				const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind);
+				qbe_write_noindent(qbe, allocation.text)!;
 				qbe_write(qbe, format("call $__echo_str(l {}0)\n", allocation.name))!;
 			};
 		};
@@ -869,9 +1022,39 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	};
 };
 
+fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
+	if (token.name == "main") {
+		qbe_write(qbe, "export function w $main() {")!;
+	} else {
+		qbe_write(qbe, format("function w $%s() {", token.name))!;
+	};
+	qbe_write(qbe, "@start")!;
+	qbe_set_indent(qbe, 4);
+	for (const token .. token.body.tokens) {
+		fmt::println("täsä", token_to_tokenkind(token))!;
+		// if (token is FunDefToken) {
+		// 	qbe_write_function(qbe, token as FunDefToken);
+		// } 
+		if (token is FuncallToken) {
+			qbe_write_funcall(qbe, token as FuncallToken);
+		} else if (token is VariableToken) {
+			qbe_write_variable(qbe, token as VariableToken);
+		} else if (token is IfToken) {
+			qbe_write_if(qbe, token as IfToken);
+		};
+	};
+	qbe_write(qbe, "ret 0")!;
+	qbe_set_indent(qbe, 0);
+	qbe_write(qbe, "}")!;
+};
+
 fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
 	const allocation = qbe_define_allocation(qbe, token.value.value_size, token.value.value, token.value.kind, token.name);
-	qbe_write(qbe, allocation.text)!;
+	qbe_write_noindent(qbe, allocation.text)!;
+};
+
+fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
+	qbe_write(qbe, "if")!;
 };
 
 export fn main() void = {
@@ -914,27 +1097,27 @@ export fn main() void = {
 	print_lexed_symbols(lexer); // debug
 
 	// Initialize the tokenizer based on the lexer's accumulated output data buffer
-	const tokenizer = init_tokenizer(nup_file_contents, lexer);
+	const globalTokenizer = init_tokenizer(lexer);
 
-	// Tokenize based on the lexed symbols buffer
-	tokenizer_tokenize(&tokenizer);
+	// Parse globally
+	tokenizer_parse_block(&globalTokenizer);
 
 	// Initialize qbe struct and prefill the buffer with base utilities and
 	// functions
 	const qbe = qbe_initialize("./base.qbe");
 
-	qbe_write(&qbe, "export function w $main() {")!;
-	qbe_write(&qbe, "@start")!;
-
-	for (const token .. tokenizer.tokens) {
-		if (token is FuncallToken) {
-			qbe_write_funcall(&qbe, token as FuncallToken);
-		} else if (token is VariableToken) {
-			qbe_write_variable(&qbe, token as VariableToken);
+	for (const token .. globalTokenizer.tokens) {
+		if (token is FunDefToken) {
+			qbe_write_function(&qbe, token as FunDefToken);
 		};
+		// else if (token is FuncallToken) {
+		// 	qbe_write_funcall(&qbe, token as FuncallToken);
+		// } else if (token is VariableToken) {
+		// 	qbe_write_variable(&qbe, token as VariableToken);
+		// } else if (token is IfToken) {
+		// 	qbe_write_if(&qbe, token as IfToken);
+		// };
 	};
-	qbe_write(&qbe, "ret 0")!;
-	qbe_write(&qbe, "}")!;
 
 	qbe_commit(qbe, intermediary_output_file);
 	qbe_compile(intermediary_output_file_path, filename)!;
