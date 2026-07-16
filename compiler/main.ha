@@ -95,7 +95,7 @@ type FuncallToken = struct {
 
 type BlockToken = struct {
 	kind: BlockKind,
-	id: uuid::uuid,
+	id: str,
 	tokens: []Token
 };
 
@@ -110,11 +110,10 @@ type FunDefProcToken = struct {
 };
 
 type IfToken = struct {
-	id: uuid::uuid,
 	expr1: Expression,
 	expr2: Expression,
 	cmp: str,
-	block: BlockToken
+	body: BlockToken
 };
 
 type Token = (VariableToken | FuncallToken | IfToken | FunDefToken);
@@ -217,8 +216,8 @@ type Qbe = struct {
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
 
-fn gen_id() uuid::uuid = {
-	return uuid::generate();
+fn gen_id() str = {
+	return uuid::encodestr(uuid::generate());
 };
 
 fn qbe_initialize(base_file_path: str) Qbe = {
@@ -242,6 +241,12 @@ fn qbe_get_reg_label(uppercase: bool = false) str = {
 	case true => return ascii::strupper(reg)!;
 	case false => return reg;
 	};
+};
+
+fn qbe_get_loaded_reg_label(label: str, uppercase: bool = false) str = {
+	if (uppercase) label = ascii::strupper(label)!;
+	if (!uppercase) label = ascii::strlower(label)!;
+	return format("{}L", label);
 };
 
 fn qbe_get_data_label() str = {
@@ -685,10 +690,10 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 	return result;
 };
 
-fn initiate_block_token(kind: BlockKind) BlockToken = {
+fn initiate_block_token(kind: BlockKind, is_main_fun: bool = false) BlockToken = {
 	return BlockToken {
+		id = if (is_main_fun) "main" else gen_id(),
 		kind = kind,
-		id = uuid::generate(),
 		tokens = []
 	};
 };
@@ -705,7 +710,12 @@ fn init_blockwise_tokenizer(symbols: []LexSymbol, block: BlockToken) Tokenizer =
 fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 	next_expect(tokenizer, LexKind::WHITESPACE);
 
-	const expr1 = next_till_nonchar_or_nondigit(tokenizer);
+	const expr1 = match (tokenizer_parse_expression(tokenizer)) {
+	case let expression: Expression => 
+		yield expression;
+	case invalidexpression => 
+		fmt::fatal("Invalid expression encountered");
+	};
 
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
 
@@ -714,7 +724,12 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
 
-	const expr2 = next_till_nonchar_or_nondigit(tokenizer);
+	const expr2 = match (tokenizer_parse_expression(tokenizer)) {
+	case let expression: Expression => 
+		yield expression;
+	case invalidexpression => 
+		fmt::fatal("Invalid expression encountered");
+	};
 
 	next_expect(tokenizer, LexKind::WHITESPACE);
 
@@ -725,8 +740,18 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 	next_expect_rune(tokenizer, 'o');
 
 	const block = initiate_block_token(BlockKind::IF);
-	const tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
-	tokenizer_parse_block(&tokenizer);
+	const blockTokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
+	fmt::println("parse if - parse block")!;
+	tokenizer_parse_block(&blockTokenizer);
+
+	block.tokens = blockTokenizer.tokens;
+
+	append(tokenizer.tokens, IfToken {
+		expr1 = expr1,
+		expr2 = expr2,
+		body = block,
+		cmp = "=="
+	})!;
 };
 
 fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
@@ -748,8 +773,11 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 
 	fmt::println("helo fun")!;
 
-	const block = initiate_block_token(BlockKind::FUN);
+	const block = initiate_block_token(BlockKind::FUN, fun_name == "main");
+
 	const blockTokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
+
+	fmt::println("parse if - parse block")!;
 	tokenizer_parse_block(&blockTokenizer);
 
 	for (const token .. blockTokenizer.tokens) {
@@ -767,6 +795,8 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 		},
 		body = block
 	})!;
+
+	fmt::println("we exit here")!;
 };
 
 fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
@@ -775,8 +805,11 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 	const symbols_count = len(tokenizer.buffer);
 	for (tokenizer_has_next_statement(*tokenizer)) {
 		if (tokenizer.block is BlockToken) {
-			fmt::println("TOKENIZING FOR BLOCK TOKEN!")!;
+			fmt::println("TOKENIZING FOR BLOCK TOKEN !", (tokenizer.block as BlockToken).id)!;
 		};
+for (const token .. tokenizer.tokens) {
+		fmt::printfln(token_to_tokenkind(token))!;
+	};
 
 		fmt::println("pre: ", peek_next(tokenizer).value)!;
 		const keyword = next_till_nonchar(tokenizer);
@@ -786,8 +819,12 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 
 		// end closes block
 		if (keyword == "end") {
+			fmt::println("Close block")!;
 			// stop iterating buffer when scope ends
-			if (is_blockwise_tokenizer) return;
+			if (is_blockwise_tokenizer) {
+				fmt::println("stop iterating")!;
+				return;
+			};
 
 			// having end in a non-scoped context is disallowed
 			fmt::fatalf("TOKENIZER_ERROR: {}: illegal \"end\" in non-scoped code", globalTokenizer.linenum);
@@ -815,9 +852,10 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		};
 	};
 
+	fmt::println("Hello?")!;
 	// could not find end before buffer ran out
-	if (is_blockwise_tokenizer) {
-		fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block", globalTokenizer.linenum);
+	if (is_blockwise_tokenizer && (tokenizer.block as BlockToken).id != "main") {
+		fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as BlockToken).id);
 	};
 };
 
@@ -1058,6 +1096,7 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 		} else if (token is VariableToken) {
 			qbe_write_variable(qbe, token as VariableToken);
 		} else if (token is IfToken) {
+			fmt::println("if token")!;
 			qbe_write_if(qbe, token as IfToken);
 		};
 	};
@@ -1071,8 +1110,51 @@ fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
 	qbe_write_noindent(qbe, allocation.text)!;
 };
 
+fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
+	for (const token .. token.tokens) {
+		if (token is FuncallToken) {
+			qbe_write_funcall(qbe, token as FuncallToken);
+		} else if (token is VariableToken) {
+			qbe_write_variable(qbe, token as VariableToken);
+		} else if (token is IfToken) {
+			fmt::println("if token")!;
+			qbe_write_if(qbe, token as IfToken);
+		};
+	};
+};
+
 fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
-	qbe_write(qbe, "if")!;
+	const expr1alloc = qbe_define_allocation(qbe, token.expr1.value_size, token.expr1.value, token.expr1.kind);
+	const expr2alloc = qbe_define_allocation(qbe, token.expr2.value_size, token.expr2.value, token.expr2.kind);
+	qbe_write_noindent(qbe, expr1alloc.text)!;
+	qbe_write_noindent(qbe, expr2alloc.text)!;
+	switch (token.cmp) {
+	case "==" =>
+		let cmpreg1 = "";
+		let cmpreg2 = "";
+
+		if (expr1alloc.data_kind == Qbe_AllocationDataKind::INT) {
+			cmpreg1 = qbe_get_loaded_reg_label(expr1alloc.name, true);
+			qbe_write(qbe, format("{} =l loadl {}0", cmpreg1, expr1alloc.name))!;
+		} else {
+			cmpreg1= format("{}0", expr1alloc.name);
+		};
+
+		if (expr2alloc.data_kind == Qbe_AllocationDataKind::INT) {
+			cmpreg2 = qbe_get_loaded_reg_label(expr2alloc.name, true);
+			qbe_write(qbe, format("{} =l loadl {}0", cmpreg2, expr2alloc.name))!;
+		} else {
+			cmpreg2 = format("{}0", expr2alloc.name);
+		};
+		
+		qbe_write(qbe, format("%eql =l ceql {}, {}", cmpreg1, cmpreg2))!;
+	case =>
+		unimplemented();
+	};
+	qbe_write(qbe, format("jnz %eql, @ifstart, @ifend"))!;
+	qbe_write_noindent(qbe, "@ifstart")!;
+	qbe_write_block(qbe, token.body);
+	qbe_write_noindent(qbe, "@ifend")!;
 };
 
 export fn main() void = {
