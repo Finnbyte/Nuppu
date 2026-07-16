@@ -1080,7 +1080,7 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Al
 	let out: []str = [];
 	fmt::println(data_sz, strings::fromutf8_unsafe(data))!;
 	const reg = qbe_get_reg_label(true);
-	append(out, format("{}0 =l alloc8 {}", reg, figure_malloc_size(data_sz, data_kind)))!;
+	append(out, format("{}0 =l call $malloc(w {})", reg, figure_malloc_size(data_sz, data_kind)))!;
 	if (data_sz > 1 && data_kind == Qbe_AllocationDataKind::STR) {
 		append(out, format("storel {}, {}0", data[0], reg))!;
 		for (let i: size = 1; i < data_sz; i += 1) {
@@ -1169,6 +1169,7 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 		};
 	case => 
 		if (token.name == qbe.context) {
+			qbe_write(qbe, format("call $free(l %A0)\n"))!;
 			qbe_write(qbe, format("jmp @this"))!;
 		} else {
 			qbe_write(qbe, format("call ${}()\n", token.name))!;
