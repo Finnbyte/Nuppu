@@ -211,6 +211,7 @@ type Qbe_WritePositionKind = enum {
 
 type Qbe = struct {
 	indent_level: size,
+	context: str,
 	buffer: []str,
 	variables: [](str, str)
 };
@@ -225,6 +226,7 @@ fn qbe_initialize(base_file_path: str) Qbe = {
 	const base_contents = read_file_contents(base_file_path, false);
 	const lines = strings::split(base_contents, "\n")!;
 	const qbe = Qbe {
+		context = "",
 		indent_level = 0,
 		buffer = [],
 		variables = []
@@ -516,6 +518,7 @@ fn print_tokenizer_id(tokenizer: Tokenizer) void = {
 };
 
 fn tokenizer_find_variable_value(tokenizer: *Tokenizer, variable_identifier: str) (void | Expression) = {
+	fmt::println("tokenizer_find_variable_value called with keyword:", variable_identifier)!;
 	for (let i = len(tokenizer.tokens) - 1; i >= 0; i -= 1) {
 		print_tokenizer_id(*tokenizer);
 		const token = tokenizer.tokens[i];
@@ -723,9 +726,18 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 	return result;
 };
 
-fn initiate_block_token(kind: BlockKind, is_main_fun: bool = false) BlockToken = {
+fn initiate_block_token(kind: BlockKind, fun_name: (str | void) = void) BlockToken = {
+	let id: str = @undefined;
+
+	if (kind == BlockKind::FUN) {
+		assert(!(fun_name is void));
+		id = fun_name as str;
+	} else if (kind == BlockKind::IF) {
+		id = gen_id();
+	};
+	
 	return BlockToken {
-		id = if (is_main_fun) "main" else gen_id(),
+		id = id,
 		kind = kind,
 		tokens = []
 	};
@@ -816,7 +828,7 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 
 	fmt::println("helo fun")!;
 
-	const block = initiate_block_token(BlockKind::FUN, fun_name == "main");
+	const block = initiate_block_token(BlockKind::FUN, fun_name);
 	const blockTokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
 
 	fmt::println("parse fun - parse block")!;
@@ -909,7 +921,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		};
 
 		// Check keyword
-		if (tokenizer_is_valid_builtin(keyword)) {
+		if (peek_next(tokenizer).kind == LexKind::PAREN_OPEN) {
 			tokenizer_parse_funcall(tokenizer, keyword);
 		} else if (keyword == "fun") {
 			tokenizer_parse_fun(tokenizer);
@@ -918,8 +930,10 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		} else if (keyword == "if") {
 			tokenizer_parse_if(tokenizer);
 		} else if (keyword != "") {
-			if (tokenizer_is_valid_variable(keyword) && !(tokenizer_find_variable_value(tokenizer, keyword) is void)) {
-				tokenizer_parse_variable_assign(tokenizer, keyword);
+			if (tokenizer_is_valid_variable(keyword)) {
+				if (!(tokenizer_find_variable_value(tokenizer, keyword) is void)) {
+					tokenizer_parse_variable_assign(tokenizer, keyword);
+				};
 			};
 		};
 
@@ -1154,6 +1168,11 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 			};
 		};
 	case => 
+		if (token.name == qbe.context) {
+			qbe_write(qbe, format("jmp @this"))!;
+		} else {
+			qbe_write(qbe, format("call ${}()\n", token.name))!;
+		};
 		return;
 
 	};
@@ -1163,11 +1182,14 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	if (token.name == "main") {
 		qbe_write(qbe, "export function w $main() {")!;
 	} else {
-		qbe_write(qbe, format("function w $%s() {", token.name))!;
+		qbe_write(qbe, format("function w ${}() {{", token.name))!;
 	};
+	qbe.context = token.name;
 	qbe_write(qbe, "@start")!;
+	qbe_write(qbe, format("@this"))!;
 	qbe_set_indent(qbe, 4);
 	qbe_write_block(qbe, token.body);
+	qbe_write(qbe, format("@end"))!;
 	qbe_write(qbe, "ret 0")!;
 	qbe_set_indent(qbe, 0);
 	qbe_write(qbe, "}")!;
