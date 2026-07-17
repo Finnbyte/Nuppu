@@ -13,11 +13,11 @@ The legacy interpreter was a quick prototype to mock-up a basic tokenizer/parser
 Here is a snippet of the currently supported syntax:
 
 ```
-let x = 10
-let y = "Hello World"
-y = "Hello World: Electric Boogaloo"
-echo x
-echo 50
-toupper y
-tolower "I Shall Be Lowercase"
+fun main() is
+	let x = 10
+	let y = "Hello World"
+	y = "Hello World: Electric Boogaloo"
+	echo(x)
+	echo(y)
+end
 ```
