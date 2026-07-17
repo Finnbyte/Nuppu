@@ -1,3 +1,6 @@
+// Important conventions (may not yet be fully fulfilled):
+// Strings in qbe MUST be uppercase and, when given as parameters, have 0 to signify being an array
+
 use fmt;
 use uuid;
 use errors;
@@ -89,6 +92,19 @@ type Expression = struct {
 	value_size: size
 };
 
+type Qbe_Variable = struct {
+	reg: str,
+	src_variable: (str | void),
+	value: (Expression | void),
+	kind: ExpressionKind,
+	text: (str | void)
+};
+
+type Qbe_Scope = struct {
+	id: str,
+	variables: []Qbe_Variable
+};
+
 type ReservedKeywordToken = enum {
 	RETURN
 };
@@ -143,15 +159,17 @@ type Tokenizer = struct {
 
 };
 
-fn get_variable_reg(qbe: Qbe, variable_identifier: str) str = {
+fn get_variable_reg(qbe: *Qbe, variable_identifier: str) str = {
 	fmt::println("to find", variable_identifier)!;
-	for (let i: size = len(qbe.variables) - 1; i >= 0; i -= 1 ) {
+	const scope = qbe.scope;
+	fmt::println(len(scope.variables))!;
+	for (let i: size = len(scope.variables) - 1; i >= 0; i -= 1 ) {
 		// found variable
-		const (identifier, reg) = qbe.variables[i];
-		fmt::printfln("Identifier: {}, reg: {} (searching for {}", identifier, reg, variable_identifier)!;
-		if (identifier == variable_identifier) {
+		const variable = scope.variables[i];
+		fmt::printfln("Identifier: {}, reg: {} (searching for {}", variable.src_variable, variable.reg, variable_identifier)!;
+		if (variable.src_variable is str && (variable.src_variable as str) == variable_identifier) {
 			fmt::printfln("found!")!;
-			return reg;
+			return variable.reg;
 		};
 	};
 	fmt::printfln("didn't find!")!;
@@ -223,7 +241,7 @@ type Qbe = struct {
 	indent_level: size,
 	context: str,
 	buffer: []str,
-	variables: [](str, str)
+	scope: Qbe_Scope,
 };
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
@@ -239,7 +257,10 @@ fn qbe_initialize(base_file_path: str) Qbe = {
 		context = "",
 		indent_level = 0,
 		buffer = [],
-		variables = []
+		scope = Qbe_Scope {
+			id = "global",
+			variables = []
+		}
 	};
 	for (const line .. lines) {
 		qbe_write(&qbe, line)!;
@@ -560,7 +581,7 @@ fn tokenizer_find_variable_value(tokenizer: *Tokenizer, variable_identifier: str
 			fmt::println(proc.parameters[0].name, variable_identifier)!;
 			if  (proc.parameters[0].name == variable_identifier) {
 				return Expression {
-					kind = ExpressionKind::INT,
+					kind = proc.parameters[0].kind,
 					value = strings::toutf8("5"),
 					value_size = 8,
 					var = void
@@ -853,6 +874,7 @@ fn tokenizer_parse_fun_parameters(tokenizer: *Tokenizer) []ParameterToken = {
 		assert(len(splitted_param) == 2);
 		const param_name = strings::trim(splitted_param[0]);
 		const param_type = strings::trim(splitted_param[1]);
+		fmt::println("hey", param_type)!;
 		const kind = switch (param_type) {
 			case "int" => yield ExpressionKind::INT;
 			case => yield ExpressionKind::STR;
@@ -1143,6 +1165,7 @@ fn indent_buf(buf: []str, indent_level: size) void = {
 
 
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_AllocationDataKind, data_identifier: (str | void) = void) Qbe_Allocation = {
+	const scope = qbe.scope;
 	let out: []str = [];
 	fmt::println(data_sz, strings::fromutf8_unsafe(data))!;
 	const reg = qbe_get_reg_label(true);
@@ -1160,9 +1183,18 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Al
 		append(out, format("storel {}, {}0", strings::fromutf8_unsafe(data), reg))!;
 	};
 
-	if (data_identifier is str) {
-		append(qbe.variables, (data_identifier as str, reg))!;
-	};
+	qbe_scope_add_variable(qbe, Qbe_Variable {
+		reg = reg,
+		kind = data_kind,
+		src_variable = data_identifier,
+		value = Expression {
+			var = data_identifier,
+			kind = data_kind,
+			value = data,
+			value_size = data_sz
+		},
+		text = void,
+	});
 
 	// separate allocations for cleaner .ssa content
 	append(out, "\n")!;
@@ -1192,9 +1224,20 @@ fn qbe_define_literal_integer(data: []u8) Qbe_Integer = {
 fn qbe_define_blit(qbe: *Qbe, src_reg: str, bytes_amount: size) Qbe_Blit = {
 	const dest_reg = qbe_get_reg_label(true);
 	const out: []str = [];
-
+	
 	append(out, format("{}0 =l alloc8 {}", dest_reg, bytes_amount))!;
-	append(out, format("blit {}0, {}0, {}", src_reg, dest_reg, bytes_amount))!;
+
+	const var = qbe_scope_find_var_by_reg(qbe, src_reg);
+	if (var is void) {
+		fmt::fatal("COULD NOT FIND VARIABLE");
+	};
+
+	if ((var as Qbe_Variable).kind == ExpressionKind::INT) {
+		append(out, format("storel {}, {}0", src_reg, dest_reg))!;
+	} else {
+		append(out, format("blit {}, {}0, {}", src_reg, dest_reg, bytes_amount))!;
+	};
+
 	indent_buf(out, qbe.indent_level);
 
 	return Qbe_Blit {
@@ -1204,19 +1247,42 @@ fn qbe_define_blit(qbe: *Qbe, src_reg: str, bytes_amount: size) Qbe_Blit = {
 	};
 };
 
+fn qbe_scope_find_var_by_reg(qbe: *Qbe, reg_to_find: str) (Qbe_Variable | void)  = {
+	for (const variable .. qbe.scope.variables) {
+		if (variable.reg == reg_to_find) {
+			return variable;
+		};
+	};
+	return void;
+};
+
+fn qbe_scope_find_var_by_src_var(qbe: *Qbe, src_var_to_find: str) (Qbe_Variable | void) = {
+	for (const variable .. qbe.scope.variables) {
+		if (variable.src_variable is str && (variable.src_variable as str) == src_var_to_find) {
+			return variable;
+		};
+	};
+	return void;
+};
+
+
+
 fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	switch (token.name) {
 	case "echo" =>
 		// write different printf depending of if echoing a variable
 		if (token.arguments[0].var is str) {
+			fmt::println("1 b")!;
 			const var = token.arguments[0].var as str;
-			const reg = get_variable_reg(*qbe, var);
+			const reg = get_variable_reg(qbe, var);
 			if (token.arguments[0].kind == ExpressionKind::INT) {
+				fmt::println("2 b")!;
 				const blit = qbe_define_blit(qbe, reg, token.arguments[0].value_size);
 				qbe_write_noindent(qbe, blit.text)!;
 				qbe_write(qbe, format("{} =l call $___itoa(l {}0)\n", blit.name, blit.name))!;
 				qbe_write(qbe, format("call $__echo_str(l {})\n", blit.name))!;
 			} else if (token.arguments[0].kind == ExpressionKind::STR) {
+				fmt::println("3 b")!;
 				qbe_write(qbe, format("call $__echo_str(l {}0)\n", reg))!;
 			};
 		} else {
@@ -1244,13 +1310,15 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 			qbe_write(qbe, format("jmp @this"))!;
 		} else {
 			if (len(token.arguments) > 0 &&  token.arguments[0].kind == ExpressionKind::INT) {
+				fmt::println("TREAT AS INT!!")!;
 				const integer = qbe_define_literal_integer(token.arguments[0].value);
 				qbe_write(qbe, integer.text)!;
-				qbe_write(qbe, format("call ${}(w {})\n", token.name, integer.name))!;
+				qbe_write(qbe, format("call ${}(l {})\n", token.name, integer.name))!;
 			} else if (len(token.arguments) > 0 && token.arguments[0].kind == ExpressionKind::STR) {
+				fmt::println("TREAT AS STR!!")!;
 				const allocation = qbe_define_allocation(qbe, token.arguments[0].value_size, token.arguments[0].value, token.arguments[0].kind);
 				qbe_write_noindent(qbe, allocation.text)!;
-				qbe_write(qbe, format("call ${}()\n", token.name))!;
+				qbe_write(qbe, format("call ${}(l {})\n", token.name, allocation.name))!;
 			} else {
 				qbe_write(qbe, format("call ${}()\n", token.name))!;
 			};
@@ -1264,19 +1332,41 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 fn qbe_define_function_arguments(qbe: *Qbe, proc: FunDefProcToken) str = {
 	const out: []str = [];
 	for (const arg .. proc.parameters) {
-		if (arg.kind == ExpressionKind::INT) append(out, format("w %{}", arg.name))!;
-		append(qbe.variables, (arg.name, qbe_get_reg_label()))!;
+		// FEAT: make uppercase for strings
+		append(out, format("l %{}", arg.name))!;
+		fmt::println("HERE DEFINING ARG TO SCOPE")!;
+		qbe_scope_add_variable(qbe, Qbe_Variable {
+			kind = arg.kind,
+			reg = format("%{}", arg.name),
+			src_variable = arg.name,
+			value = void,
+			text = void
+		});
 	};
 
 	return join(out, ", ");
 };
 
+fn qbe_scope_add_variable(qbe: *Qbe, variable: Qbe_Variable) void = {
+	append(qbe.scope.variables, variable)!;
+};
+
+fn qbe_scope_init(qbe: *Qbe, scope_id: str) void = {
+	qbe.scope = Qbe_Scope {
+		id = scope_id,
+		variables = [],
+	};
+};
+
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
+	qbe_scope_init(qbe, token.name);
+
 	if (token.name == "main") {
 		qbe_write(qbe, "export function w $main() {")!;
 	} else {
 		qbe_write(qbe, format("function w ${}({}) {{", token.name, qbe_define_function_arguments(qbe, token.proc)))!;
 	};
+
 	qbe.context = token.name;
 	qbe_write(qbe, "@start")!;
 	qbe_write(qbe, format("@this"))!;
