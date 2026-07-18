@@ -1289,7 +1289,7 @@ fn qbe_define_blit(qbe: *Qbe, src_reg: Qbe_Identifier, bytes_amount: size) Qbe_B
 	};
 
 	if ((var as Qbe_Variable).kind == ExpressionKind::INT) {
-		append(out, format("storel {}, {0", src_reg_str, dest_reg_str))!;
+		append(out, format("storel {}, {}", src_reg_str, dest_reg_str))!;
 	} else {
 		append(out, format("blit {}, {}, {}", src_reg_str, dest_reg_str, bytes_amount))!;
 	};
@@ -1337,15 +1337,23 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 			const reg = get_variable_reg(qbe, var);
 			const reg_str = qbe_show_reg(reg);
 			if (token.arguments[0].kind == ExpressionKind::INT) {
-				fmt::println("2 b")!;
-				const blit = qbe_define_blit(qbe, reg, token.arguments[0].value_size);
-				qbe_write_noindent(qbe, blit.text)!;
-				qbe_write(qbe, format("{} =l call $___itoa(l {})\n", reg_str, reg_str))!;
-				qbe_write(qbe, format("call $__echo_str(l {})\n", reg_str))!;
+				qbe_write(qbe, format("call $__echo_int(l {})\n", reg_str))!;
 			} else if (token.arguments[0].kind == ExpressionKind::STR) {
-				fmt::println("3 b")!;
 				qbe_write(qbe, format("call $__echo_str(l {})\n", reg_str))!;
 			};
+
+			// is it needed? if is from a variable it should already
+			// be bound to a register
+			// if (token.arguments[0].kind == ExpressionKind::INT) {
+			// 	fmt::println("2 b")!;
+			// 	const blit = qbe_define_blit(qbe, reg, token.arguments[0].value_size);
+			// 	qbe_write_noindent(qbe, blit.text)!;
+			// 	qbe_write(qbe, format("{} =l call $___itoa(l {})\n", reg_str, reg_str))!;
+			// 	qbe_write(qbe, format("call $__echo_str(l {})\n", reg_str))!;
+			// } else if (token.arguments[0].kind == ExpressionKind::STR) {
+			// 	fmt::println("3 b")!;
+			// 	qbe_write(qbe, format("call $__echo_str(l {})\n", reg_str))!;
+			// };
 		} else {
 			fmt::println(len(token.arguments))!;
 			switch (token.arguments[0].kind) {
@@ -1360,14 +1368,14 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 
 			} else if (token.arguments[0].kind == ExpressionKind::STR) {
 				fmt::println("alloca")!;
-				const data = qbe_define_data(qbe, "$fmt", token.arguments[0]);
+				const label =qbe_get_data_label();
+				const data = qbe_define_data(qbe,label,  token.arguments[0]);
 				qbe_write_noindent(qbe, data, Qbe_WritePositionKind::PREPEND)!;
-				qbe_write(qbe, format("call $__echo_str(l $fmt)\n"))!;
+				qbe_write(qbe, format("call $__echo_str(l {})\n", label))!;
 			};
 		};
 	case => 
 		if (token.name == qbe.context) {
-			qbe_write(qbe, format("call $free(l %A0)\n"))!;
 			qbe_write(qbe, format("jmp @this"))!;
 		} else {
 			if (len(token.arguments) > 0 &&  token.arguments[0].kind == ExpressionKind::INT) {
@@ -1376,9 +1384,10 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 				qbe_write(qbe, integer.text)!;
 				qbe_write(qbe, format("call ${}(l {})\n", token.name, qbe_show_reg(integer.reg)))!;
 			} else if (len(token.arguments) > 0 && token.arguments[0].kind == ExpressionKind::STR) {
-				const data = qbe_define_data(qbe, "$fmt", token.arguments[0]);
+				const label = qbe_get_data_label();
+				const data = qbe_define_data(qbe, label, token.arguments[0]);
 				qbe_write_noindent(qbe, data, Qbe_WritePositionKind::PREPEND)!;
-				qbe_write(qbe, format("call $__echo_str(l $fmt)\n"))!;
+				qbe_write(qbe, format("call $__echo_str(l {})\n", label))!;
 			} else {
 				qbe_write(qbe, format("call ${}()\n", token.name))!;
 			};
@@ -1454,6 +1463,7 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 		if (token is ReservedKeywordToken) {
 			switch (token as ReservedKeywordToken) {
 			case ReservedKeywordToken::RETURN => 
+				qbe_write(qbe, "@end")!;
 				qbe_write(qbe, "ret 0")!;
 			};
 		};
