@@ -18,6 +18,6 @@ function $__echo_str(l %X0) {
 
 function $__echo_int(l %x) {
 	@start
-		call $printf(l $fmtd, l %x)
+		call $printf(l $echofmtd, l %x)
 		ret
 }
