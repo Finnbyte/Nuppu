@@ -1307,12 +1307,19 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Al
 	};
 };
 
-fn qbe_define_literal_integer(data: []u8) Qbe_Integer = {
+fn qbe_define_literal_integer(data: []u8) Qbe_Variable = {
 	const reg = qbe_get_reg_label();
 	const text = format("{} =l copy {}\n", qbe_show_reg(reg), strings::fromutf8_unsafe(data));
-	return Qbe_Integer {
+	return Qbe_Variable {
 		reg = reg,
-		data = data,
+		src_variable = void,
+		kind = ExpressionKind::INT,
+		value = Expression {
+			value = data,
+			value_size = 8,
+			kind = ExpressionKind::INT,
+			var = void
+		},
 		text = text
 	};
 };
@@ -1424,7 +1431,7 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 		if (len(token.arguments) > 0 &&  token.arguments[0].kind == ExpressionKind::INT) {
 			fmt::println("TREAT AS INT!!")!;
 			const integer = qbe_define_literal_integer(token.arguments[0].value);
-			qbe_write(qbe, integer.text)!;
+			qbe_write(qbe, (integer.text as str))!;
 			qbe_write(qbe, format("call ${}(l {})\n", token.name, qbe_show_reg(integer.reg)))!;
 		} else if (len(token.arguments) > 0 && token.arguments[0].kind == ExpressionKind::STR) {
 			const label = qbe_get_data_label();
