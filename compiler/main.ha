@@ -1577,6 +1577,7 @@ fn qbe_globals_find_var_by_val(qbe: *Qbe, value_to_find: []u8) (Qbe_Variable | v
 };
 
 fn qbe_scope_find_var_by_src_var(qbe: *Qbe, src_var_to_find: str) (Qbe_Variable | void) = {
+	fmt::println(len(qbe.scope.variables))!;
 	for (const variable .. qbe.scope.variables) {
 		fmt::println("yo gng", variable.src_variable)!;
 		if (variable.src_variable is str && (variable.src_variable as str) == src_var_to_find) {
@@ -1614,7 +1615,7 @@ fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 		};
 		// FEAT: make uppercase for strings
 		append(out, format("l {}", identifier.reg))!;
-		fmt::println("HERE DEFINING ARG TO SCOPE")!;
+		fmt::println("HERE DEFINING ARG TO SCOPE", qbe.scope.id)!;
 		qbe_scope_add_variable(qbe, Qbe_Variable {
 			kind = arg.kind,
 			reg = identifier,
@@ -1629,8 +1630,10 @@ fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 };
 
 fn qbe_scope_add_variable(qbe: *Qbe, variable: Qbe_Variable) void = {
+	// assert(variable.src_variable is str);
 	append(qbe.scopes[len(qbe.scopes) - 1].variables, variable)!;
 	qbe.scope = qbe.scopes[len(qbe.scopes) - 1];
+	fmt::printfln("adding {} to {}", variable.src_variable, qbe.scopes[len(qbe.scopes) - 1].id)!;
 };
 
 fn qbe_add_global_data(qbe: *Qbe, variable: Qbe_Variable) void = {
@@ -1641,7 +1644,7 @@ fn qbe_scope_push(qbe: *Qbe, scope_id: str, scope_kind: Qbe_ScopeKind) void = {
 	// TODO: push current scope items into new scope.
 	// this means to treat the scope as a sort-of *stack*.
 	
-	fmt::println(qbe.scopes[0].id)!;
+	fmt::println("push to scope", scope_id)!;
 	const variables: []Qbe_Variable = [];
 
 	if (len(qbe.scopes) == 1) {
@@ -1650,7 +1653,7 @@ fn qbe_scope_push(qbe: *Qbe, scope_id: str, scope_kind: Qbe_ScopeKind) void = {
 		};
 	};
 
-	for (const scope .. qbe.scopes) {
+	for (const scope .. qbe.scopes[1..]) {
 		fmt::println("here!", scope.id)!;
 		for (const var .. scope.variables) {
 			fmt::println("here 2", var.src_variable)!;
