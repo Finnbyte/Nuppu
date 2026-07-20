@@ -276,6 +276,7 @@ type Qbe = struct {
 	indent_level: size,
 	context: str,
 	buffer: []str,
+	scopes: []Qbe_Scope,
 	scope: Qbe_Scope,
 	datas: []Qbe_Variable
 };
@@ -289,17 +290,24 @@ fn gen_id() str = {
 fn qbe_initialize(base_file_path: str) Qbe = {
 	const base_contents = read_file_contents(base_file_path, false);
 	const lines = strings::split(base_contents, "\n")!;
+	const initial_scope = Qbe_Scope {
+			id = "global",
+			kind = Qbe_ScopeKind::GLOBAL,
+			variables = []
+		};
 	const qbe = Qbe {
 		context = "",
 		indent_level = 0,
 		buffer = [],
 		datas = [],
-		scope = Qbe_Scope {
-			id = "global",
-			kind = Qbe_ScopeKind::GLOBAL,
-			variables = []
-		}
+		scopes = [],
+		scope = initial_scope
 	};
+
+	// Set initial scope data
+	append(qbe.scopes, initial_scope)!;
+	qbe.scope = initial_scope;
+
 	for (const line .. lines) {
 		qbe_write(&qbe, line)!;
 	};
@@ -1289,7 +1297,7 @@ fn qbe_define_funcall_args(qbe: *Qbe, arguments: []AnyExpression) str = {
 			const result = qbe_scope_find_var_by_src_var(qbe, arg.name);
 			match (result) {
 			case let var: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(var.reg)))!;
-			case void => fmt::fatal("Could not find variable");
+			case void => fmt::fatalf("Could not find variable: {}", arg.name);
 			};
 		};
 	};
@@ -1302,6 +1310,7 @@ fn qbe_define_funcall_args(qbe: *Qbe, arguments: []AnyExpression) str = {
 fn qbe_define_funcall(qbe: *Qbe, token: FuncallToken) str = {
 	let text: str = @undefined;
 
+		fmt::println("HEIIIII")!;
 	// handle recursive fun call
 	if (token.name == qbe.scope.id) {
 		unimplemented("Recursive call");
@@ -1579,9 +1588,10 @@ fn qbe_scope_find_var_by_src_var(qbe: *Qbe, src_var_to_find: str) (Qbe_Variable 
 
 fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	// handle recursive fun call
-	if (token.name == qbe.scope.id) {
-		unimplemented("Recursive call");
-	};
+	// if (token.name == qbe.scope.id) {
+	// 	qbe_write(qbe, "call $lol(l %b0)")!;
+	// 	return;
+	// };
 
 	// No args
 	if (len(token.arguments) == 0) {
@@ -1597,20 +1607,21 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 	const out: []str = [];
 	for (const arg .. proc.parameters) {
+		const identifier = Qbe_Identifier {
+			reg = format("%{}", arg.name),
+			kind = Qbe_IdentifierKind::REG,
+			index = void
+		};
 		// FEAT: make uppercase for strings
-		append(out, format("l %{}", arg.name))!;
+		append(out, format("l {}", identifier.reg))!;
 		fmt::println("HERE DEFINING ARG TO SCOPE")!;
 		qbe_scope_add_variable(qbe, Qbe_Variable {
 			kind = arg.kind,
-			reg = Qbe_Identifier {
-				reg = format("%{}", arg.name),
-				kind = Qbe_IdentifierKind::REG,
-				index = void
-			},
+			reg = identifier,
 			src_variable = arg.name,
 			value = void,
-			text = void,
-			is_emitted = false
+			text = format("l {}", qbe_show_reg(identifier)),
+			is_emitted = true
 		});
 	};
 
@@ -1618,38 +1629,49 @@ fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 };
 
 fn qbe_scope_add_variable(qbe: *Qbe, variable: Qbe_Variable) void = {
-	append(qbe.scope.variables, variable)!;
+	append(qbe.scopes[len(qbe.scopes) - 1].variables, variable)!;
+	qbe.scope = qbe.scopes[len(qbe.scopes) - 1];
 };
 
 fn qbe_add_global_data(qbe: *Qbe, variable: Qbe_Variable) void = {
 	append(qbe.datas, variable)!;
 };
 
-fn qbe_scope_init(qbe: *Qbe, scope_id: str, scope_kind: Qbe_ScopeKind) void = {
+fn qbe_scope_push(qbe: *Qbe, scope_id: str, scope_kind: Qbe_ScopeKind) void = {
 	// TODO: push current scope items into new scope.
 	// this means to treat the scope as a sort-of *stack*.
 	
-	// Get variables from the global scope because they need to be seen as well.
+	fmt::println(qbe.scopes[0].id)!;
 	const variables: []Qbe_Variable = [];
-	for (const data .. qbe.datas) {
-		append(variables, data)!;
+
+	if (len(qbe.scopes) == 1) {
+		for (const data .. qbe.datas) {
+			append(variables, data)!;
+		};
 	};
 
-	fmt::println("Created new scope.")!;
+	for (const scope .. qbe.scopes) {
+		fmt::println("here!", scope.id)!;
+		for (const var .. scope.variables) {
+			fmt::println("here 2", var.src_variable)!;
+			append(variables, var)!;
+		};
+	};
 
-	qbe.scope = Qbe_Scope {
+	const new_scope = Qbe_Scope {
 		id = scope_id,
 		kind = scope_kind,
 		variables = variables
 	};
+
+	append(qbe.scopes, new_scope)!;
+
+	qbe.scope = new_scope;
 };
 
-fn qbe_scope_clear(qbe: *Qbe) void = {
-	qbe.scope = Qbe_Scope {
-		id = "global",
-		kind = Qbe_ScopeKind::GLOBAL,
-		variables = []
-	};
+fn qbe_scope_pop(qbe: *Qbe) void = {
+	delete(qbe.scopes[len(qbe.scopes) - 1]);
+	qbe.scope = qbe.scopes[len(qbe.scopes) - 1];
 };
 
 fn qbe_scope_update_var(qbe: *Qbe, new_var: Qbe_Variable) void = {
@@ -1665,7 +1687,7 @@ fn qbe_scope_update_var(qbe: *Qbe, new_var: Qbe_Variable) void = {
 };
 
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
-	qbe_scope_init(qbe, token.name, Qbe_ScopeKind::FUN);
+	qbe_scope_push(qbe, token.name, Qbe_ScopeKind::FUN);
 
 	if (token.name == "main") {
 		qbe_write(qbe, "export function w $main() {")!;
@@ -1679,7 +1701,7 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	qbe_write_block(qbe, token.body);
 	qbe_set_indent(qbe, 0);
 	qbe_write(qbe, "}")!;
-	qbe_scope_clear(qbe);
+	qbe_scope_pop(qbe);
 };
 
 fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
@@ -1752,9 +1774,9 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 	};
 	qbe_write(qbe, format("jnz %eql, @ifstart, @ifend"))!;
 	qbe_write_noindent(qbe, "@ifstart")!;
-	qbe_scope_init(qbe, "if", Qbe_ScopeKind::IF);
+	qbe_scope_push(qbe, "if", Qbe_ScopeKind::IF);
 	qbe_write_block(qbe, token.body);
-	qbe_scope_clear(qbe);
+	qbe_scope_pop(qbe);
 	qbe_write_noindent(qbe, "@ifend")!;
 };
 
