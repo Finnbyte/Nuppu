@@ -1,2 +1,5 @@
-let x = "Hello World"
-echo x
+fun main() is
+	let x: str = "Hello World"
+	let i: int = add(12)
+	return 0
+end
