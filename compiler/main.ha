@@ -6,6 +6,8 @@
 //     right: ExprTree | ExprNode
 // }
 
+use types;
+use rt;
 use fmt;
 use uuid;
 use errors;
@@ -27,6 +29,7 @@ type LexKind = enum {
 	PAREN_OPEN,
 	PAREN_CLOSE,
 	COLON,
+	EXCLAMATION,
 	WHITESPACE,
 	NEWLINE,
 	DIGIT,
@@ -35,6 +38,38 @@ type LexKind = enum {
 	SINGLE_QUOTE,
 	QUOTE
 };
+
+fn mins(nums: size...) size = {
+	let smallest: size = types::SIZE_MAX;
+	for (const num .. nums) {
+		if (num < smallest) {
+			smallest = num;
+		};
+	};
+	return smallest;
+};
+
+fn maxi(nums: int...) int = {
+	let biggest = 0;
+	for (const num .. nums) {
+		if (num > biggest) {
+			biggest = num;
+		};
+	};
+	return biggest;
+};
+
+fn maxs(nums: size...) size = {
+	let smallest: size = types::SIZE_MAX;
+	for (const num .. nums) {
+		if (num < smallest) {
+			smallest = num;
+		};
+	};
+	return smallest;
+};
+
+let ifi = 0;
 
 fn lexkind_to_rune(kind: LexKind) str = {
 	switch (kind) {
@@ -50,17 +85,18 @@ fn lexkind_to_rune(kind: LexKind) str = {
 	case LexKind::SINGLE_QUOTE => return "SINGLE_QUOTE";
 	case LexKind::COLON => return "COLON";
 	case LexKind::QUOTE => return "QUOTE";
+	case LexKind::EXCLAMATION => return "EXCLAMATION";
 	case => return "UNRECOGNIZED?";
 	};
 };
 
 fn token_to_tokenkind(token: Token) str = {
 	match (token) {
-	case VariableToken => return "VariableToken";
-	case IfToken => return "IfToken";
-	case FuncallToken => return "FuncallToken";
-	case FunDefToken => return "FunDefToken";
-	case ReservedKeywordToken => return "ReservedKeywordToken";
+	case *VariableToken => return "VariableToken";
+	case *IfToken => return "IfToken";
+	case *FuncallToken => return "FuncallToken";
+	case *FunDefToken => return "FunDefToken";
+	case *ReturnToken => return "ReturnToken";
 	};
 };
 
@@ -70,6 +106,7 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 	case ')' => return LexKind::PAREN_CLOSE;
 	case ',' => return LexKind::COMMA;
 	case ' ' => return LexKind::WHITESPACE;
+	case '!' => return LexKind::EXCLAMATION;
 	case '\n' => return LexKind::NEWLINE;
 	case ':' => return LexKind::COLON;
 	case '\0' => return LexKind::NULLTERM;
@@ -91,6 +128,60 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 
 };
 
+fn clone_expression(expression: (*Expression | void)) (*Expression | void) = {
+	match (expression) {
+	case let expression: *Expression =>
+		let value: []u8 = @undefined;
+		if (expression.value_size <= 0) {
+			const value: []u8 = alloc([], 0)!;
+		} else {
+			fmt::printfln("Halo {} '{}'", expression.value_size, strings::fromutf8_unsafe(expression.value))!;
+			const value: []u8 = alloc([0...], expression.value_size)!;
+			let idx = 0;
+			if (expression.value_size > 0) {
+				for (const byte .. expression.value) {
+					fmt::println(byte, idx)!;
+					value[idx] = byte;
+					idx += 1;
+				};
+			};
+		};
+
+		return alloc(Expression {
+			value = value,
+			value_size = expression.value_size,
+			kind = expression.kind
+		})!;
+	case void => return void;
+	};
+
+};
+
+type ExprTreeNode = struct {
+	value: AnyExpression,
+	next: nullable *ExprTreeNode
+};
+
+type ExprTree = struct {
+	head: nullable *ExprTreeNode
+};
+
+fn clone_qbe_variable(variable: Qbe_Variable) Qbe_Variable = {
+	const var = Qbe_Variable {
+		reg = Qbe_Identifier {
+			reg= strings::dup(variable.reg.reg)!,
+			kind= variable.reg.kind,
+			index= variable.reg.index
+		},
+		src_variable= if (variable.src_variable is str) strings::dup(variable.src_variable as str)! else void,
+		value = clone_expression(variable.value),
+		kind= variable.kind,
+		text= if (variable.text is str) strings::dup(variable.text as str)! else void,
+		is_emitted= variable.is_emitted
+	};
+	return var;
+};
+
 type LexSymbol = struct {
 	kind: LexKind,
 	value: rune
@@ -105,7 +196,19 @@ type Expression = struct {
 type FunctionExpression = struct {
 	name: str,
 	var: (str | void),
-	arguments: []AnyExpression
+	arguments: *ExprTree
+};
+
+type IfCondNode = struct {
+	expr1: AnyExpression,
+	expr2: AnyExpression,
+	cmp: str,
+	next: nullable *IfCondNode,
+	next_type: nullable *str
+};
+
+type CondTree = struct {
+	head: nullable *IfCondNode,
 };
 
 type VariableExpression = struct {
@@ -113,7 +216,7 @@ type VariableExpression = struct {
 	var: (str | void)
 };
 
-type AnyExpression = (Expression | VariableExpression | FunctionExpression);
+type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression);
 
 type Qbe_Identifier = struct {
 	reg: str,
@@ -124,7 +227,7 @@ type Qbe_Identifier = struct {
 type Qbe_Variable = struct {
 	reg: Qbe_Identifier,
 	src_variable: (str | void),
-	value: (Expression | void),
+	value: (*Expression | void),
 	kind: ExpressionKind,
 	text: (str | void),
 	is_emitted: bool
@@ -142,13 +245,13 @@ type Qbe_Scope = struct {
 	variables: []Qbe_Variable
 };
 
-type ReservedKeywordToken = enum {
-	RETURN
+type ReturnToken = struct {
+	value: AnyExpression
 };
 
 type FuncallToken = struct {
 	name: str,
-	arguments: []AnyExpression,
+	arguments: *ExprTree,
 };
 
 type BlockToken = struct {
@@ -164,8 +267,8 @@ type ParameterToken = struct {
 
 type FunDefToken = struct {
 	name: str,
-	proc: FunDefProcToken,
-	body: BlockToken
+	proc: *FunDefProcToken,
+	body: *BlockToken
 };
 
 type FunDefProcToken = struct {
@@ -174,13 +277,11 @@ type FunDefProcToken = struct {
 };
 
 type IfToken = struct {
-	expr1: AnyExpression,
-	expr2: AnyExpression,
-	cmp: str,
-	body: BlockToken
+	tree: *CondTree,
+	body: *BlockToken
 };
 
-type Token = (VariableToken | FuncallToken | IfToken | FunDefToken | ReservedKeywordToken);
+type Token = (*VariableToken | *FuncallToken | *IfToken | *FunDefToken | *ReturnToken);
 
 type VariableToken = struct {
 	kind: VariableKind,
@@ -189,7 +290,7 @@ type VariableToken = struct {
 };
 
 type Tokenizer = struct {
-	block: (BlockToken | void),
+	block: (*BlockToken | void),
 	tokens: []Token,
 	buffer: []LexSymbol,
 	linenum: int,
@@ -231,6 +332,35 @@ type BlockKind = enum {
 type ExpressionKind = enum {
 	INT,
 	STR
+};
+
+fn expressionkind_to_str(kind: ExpressionKind) str = {
+	return switch (kind) {
+	case ExpressionKind::INT => yield "INT";
+	case ExpressionKind::STR => yield "STR";
+	};
+};
+
+fn expression_to_str(anyexpr: AnyExpression) str = {
+	return match (anyexpr) {
+	case let expr: *Expression =>
+		yield switch (expr.kind) {
+		case ExpressionKind::STR => yield format("\"{}\"", strings::fromutf8_unsafe(expr.value));
+		case ExpressionKind::INT => yield strings::fromutf8_unsafe(expr.value);
+		};
+	case let expr: *VariableExpression => yield expr.name;
+	case let expr: *FunctionExpression =>
+		const args: []str = [];
+		if (ll_empty(expr.arguments: *LinkedList)) yield "()";
+		const node = ll_first(expr.arguments: *LinkedList);
+		for (node != null) {
+			const exprNode = (node: *LinkedListNode).value: *ExprTreeNode;
+			append(args, expression_to_str(exprNode.value))!;
+			node = (node: *LinkedListNode).next;
+		};
+		yield format("{}({})", expr.name, join(args, ", "));
+	case => fmt::fatal("Unknown expression");
+	};
 };
 
 type Qbe_Integer = struct {
@@ -276,9 +406,8 @@ type Qbe = struct {
 	indent_level: size,
 	context: str,
 	buffer: []str,
-	scopes: []Qbe_Scope,
-	scope: Qbe_Scope,
-	datas: []Qbe_Variable
+	scopes: []*Qbe_Scope,
+	scope: *Qbe_Scope
 };
 
 type Qbe_WritePosition = (int | Qbe_WritePositionKind);
@@ -290,23 +419,23 @@ fn gen_id() str = {
 fn qbe_initialize(base_file_path: str) Qbe = {
 	const base_contents = read_file_contents(base_file_path, false);
 	const lines = strings::split(base_contents, "\n")!;
-	const initial_scope = Qbe_Scope {
-			id = "global",
-			kind = Qbe_ScopeKind::GLOBAL,
-			variables = []
-		};
+
+	const initial_scope = alloc(Qbe_Scope {
+		id = "global",
+		kind = Qbe_ScopeKind::GLOBAL,
+		variables = []
+	})!;
+
 	const qbe = Qbe {
 		context = "",
 		indent_level = 0,
 		buffer = [],
-		datas = [],
 		scopes = [],
 		scope = initial_scope
 	};
 
 	// Set initial scope data
 	append(qbe.scopes, initial_scope)!;
-	qbe.scope = initial_scope;
 
 	for (const line .. lines) {
 		qbe_write(&qbe, line)!;
@@ -497,19 +626,10 @@ fn next_lexer(lexer: *Lexer) LexSymbol = {
 	return symbol;
 };
 
-fn next_expect_lexer(lexer: *Lexer, expected_ch: rune) void = {
-	if (expected_ch != lexer.buffer[0]) {
-		const actual_ch = lexer.buffer[0];
-		fmt::fatalf("{}: Expected '{}', got '{}'", 6969, expected_ch, actual_ch);
-	} else {
-		delete(lexer.buffer[0]);
-	};
-};
-
 fn next_expect(tokenizer: *Tokenizer, expected_kind: LexKind, index: size = 0) void = {
 	if (expected_kind != tokenizer.buffer[index].kind) {
 		const actual_kind = tokenizer.buffer[index].kind;
-		fmt::fatalf("{}: Expected '{}', got '{}'", tokenizer.linenum, lexkind_to_rune(expected_kind), lexkind_to_rune(actual_kind));
+		fmt::fatalf("{}: Expected '{}', got '{}'", linenum(), lexkind_to_rune(expected_kind), lexkind_to_rune(actual_kind));
 	} else {
 		delete(tokenizer.buffer[0]);
 	};
@@ -556,8 +676,11 @@ fn next_till_nonchar_or_nondigit(tokenizer: *Tokenizer) str = {
 
 };
 
+fn incr_linenum() void = {
+	globalTokenizer.linenum += 1;
+};
+
 fn next_till_kind(tokenizer: *Tokenizer, kinds: LexKind...) str = {
-	const x: str = if (kinds[0] == LexKind::CHAR) " " else "lol";
 	const buf: []rune = [];
 	for (len(tokenizer.buffer) > 0) {
 		let should_break = false;
@@ -584,22 +707,30 @@ fn next_till_nonchar(tokenizer: *Tokenizer) str = {
 	return strings::fromrunes(buf)!;
 };
 
-fn tokenizer_parse_funcall_args(tokenizer: *Tokenizer) []AnyExpression = {
-	const expressions: []AnyExpression = alloc([], size(Expression))!;
+fn create_expr_tree() *ExprTree = {
+	const tree = alloc(ExprTree {
+		head = null
+	})!;
+	return tree;
+};
+
+fn create_expr_node(value: AnyExpression) *ExprTreeNode = {
+	return alloc(ExprTreeNode {
+		value = value,
+		next = null
+	})!;
+};
+
+fn tokenizer_append_token(tokenizer: *Tokenizer, token: *Token) void = {
+	pass();
+};
+
+fn tokenizer_parse_funcall_args(tokenizer: *Tokenizer) *ExprTree = {
+	const tree = create_expr_tree();
 
 	for (peek_next(tokenizer).kind != LexKind::PAREN_CLOSE) {
-		const value = match (tokenizer_parse_expression(tokenizer)) {
-		case let expression: Expression => 
-			yield expression;
-		case let expression: VariableExpression => 
-			yield expression;
-		case let expression: FunctionExpression => 
-			yield expression;
-		case invalidexpression => 
-			fmt::fatal("Invalid expression encountered");
-		};
-
-		append(expressions, value)!;
+		const value = tokenizer_parse_expression(tokenizer);
+		ll_push(tree: *LinkedList, create_expr_node(value));
 
 		if (peek_next(tokenizer).kind == LexKind::COMMA) {
 			next(tokenizer);
@@ -607,7 +738,7 @@ fn tokenizer_parse_funcall_args(tokenizer: *Tokenizer) []AnyExpression = {
 		};
 	};
 
-	return expressions;
+	return tree;
 };
 
 fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
@@ -620,13 +751,13 @@ fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 
 	next_expect(tokenizer, LexKind::PAREN_CLOSE);
 
-	append(tokenizer.tokens, FuncallToken {
+	append(tokenizer.tokens, alloc(FuncallToken {
 		name = func_name,
 		arguments = arguments,
-	})!;
+	})!)!;
 };
 
-fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | VariableExpression | FunctionExpression | invalidexpression) = {
+fn tokenizer_parse_expression(tokenizer: *Tokenizer) (*Expression | *VariableExpression | *FunctionExpression) = {
 	fmt::println(lexkind_to_rune(peek_next(tokenizer).kind))!;
 	fmt::println("parsing expr:", peek_next(tokenizer).value)!;
 	// is it string literal?
@@ -635,11 +766,11 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | VariableExpre
 		const value = next_till_kind(tokenizer, LexKind::QUOTE);
 		fmt::println("parse_expression - raw value:", value, "is sized", len(value))!;
 		next(tokenizer);
-		return Expression {
+		return alloc(Expression {
 			kind = ExpressionKind::STR,
 			value = strings::toutf8(value),
 			value_size = len(value),
-		};
+		})!;
 	};
 
 	const raw_value = next_till_nonchar_or_nondigit(tokenizer);
@@ -647,51 +778,51 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (Expression | VariableExpre
 	// is it a number literal?
 	if (valid_integer(raw_value)) {
 		fmt::println("parse_expr - is int")!;
-		return Expression {
+		fmt::println(raw_value)!;
+		return alloc(Expression {
 			kind = ExpressionKind::INT,
 			value = strings::toutf8(raw_value),
-			value_size = len(raw_value),
-		};
+			value_size = 8,
+		})!;
 	};
 
 	// is it variable?
 	if (tokenizer_is_valid_variable(raw_value) && peek_next(tokenizer).kind != LexKind::PAREN_OPEN) {
 		fmt::println("parse_expression - is variable")!;
 		const identifier = raw_value;
-		return VariableExpression {
+		return alloc(VariableExpression {
 			name = identifier,
 			var = identifier
-		};
+		})!;
 	};
 
 	// is it function call expression?
 	if (tokenizer_is_valid_variable(raw_value) && peek_next(tokenizer).kind == LexKind::PAREN_OPEN) {
 		next(tokenizer);
-		const function_expression = FunctionExpression {
+		const argument_tree = create_expr_tree();
+		const function_expression = alloc(FunctionExpression {
 			name = raw_value,
-			arguments = [],
+			arguments = argument_tree,
 			var = void
-		};
+		})!;
 
-		const arguments: []AnyExpression = [];
 		for (peek_next(tokenizer).kind != LexKind::PAREN_CLOSE) {
+			fmt::println(peek_next(tokenizer).value)!;
 			if (peek_next(tokenizer).kind == LexKind::COMMA) next(tokenizer);
 			skip_empty(tokenizer);
-			match (tokenizer_parse_expression(tokenizer)) {
-			case let x: Expression => append(arguments, x)!;
-			case let x: VariableExpression => append(arguments, x)!;
-			case let x: FunctionExpression => append(arguments, x)!;
-			case invalidexpression => fmt::fatal("Invalid expr");
-			};
+			const value = tokenizer_parse_expression(tokenizer);
+			ll_push(function_expression.arguments: *LinkedList, create_expr_node(value));
 		};
 
-		fmt::printfln("{}: {}", function_expression.name, len(arguments))!;
-		function_expression.arguments = arguments;
 		return function_expression;
 	};
 
-	return invalidexpression;
+	return fmt::fatal("Invalid expression");
 
+};
+
+fn linenum() int = {
+	return globalTokenizer.linenum;
 };
 
 fn tokenizer_is_valid_variable(identifier: str) bool = {
@@ -707,7 +838,13 @@ fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
 	if (!tokenizer_is_valid_variable(identifier)) {
 		fmt::fatalf("TOKENIZER_ERROR: invalid variable name '{}'", identifier);
 	};
-	next_expect(tokenizer, LexKind::COLON);
+
+	// requires type
+	if (peek_next(tokenizer).kind != LexKind::COLON) {
+		fmt::fatalf("TOKENIZER_ERROR: missing type for '{}' on line: {}", identifier, linenum());
+	};
+
+	next(tokenizer);
 	skip_empty(tokenizer);
 	const var_type = switch (next_till_nonchar_or_nondigit(tokenizer)) {
 	case "int" => yield VariableKind::INT;
@@ -724,21 +861,16 @@ fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
 	fmt::println("tf is next?", peek_next(tokenizer).value)!;
 
 	const value = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: Expression => 
-		yield expression;
-	case let expression: VariableExpression => 
-		yield expression;
-	case let expression: FunctionExpression => 
-		yield expression;
-	case invalidexpression => 
-		fmt::fatal("Invalid expression encountered");
+	case let expression: *Expression => yield expression;
+	case let expression: *VariableExpression => yield expression;
+	case let expression: *FunctionExpression => yield expression;
 	};
 
-	append(tokenizer.tokens, VariableToken {
+	append(tokenizer.tokens, alloc(VariableToken {
 		name = identifier,
 		value = value,
 		kind = var_type
-	})!;
+	})!)!;
 };
 
 // Returns whether there are still statements to be tokenized in the source file buffer.
@@ -754,11 +886,11 @@ fn tokenizer_has_next_statement(tokenizer: Tokenizer) bool = {
 
 fn tokenizer_should_stop(tokenizer: *Tokenizer) bool = {
 	assert(!(tokenizer.block is void));
-	fmt::printfln("Considering if {} should stop.", (tokenizer.block as BlockToken).id)!;
+	fmt::printfln("Considering if {} should stop.", (tokenizer.block as *BlockToken).id)!;
 	const keyword = "end";
 	if (len(tokenizer.buffer) <= 0 || len(tokenizer.buffer) <= len(keyword)) return true;
 	const keyword_runes = strings::torunes(keyword)!;
-	const block = tokenizer.block as BlockToken;
+	const block = tokenizer.block as *BlockToken;
 
 	let found_end = true;
 	for (let i: size = 0; i < len(keyword); i += 1) {
@@ -780,31 +912,24 @@ fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void 
 	skip_empty(tokenizer);
 
 	const value = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: Expression => 
-		yield expression;
-	case let expression: VariableExpression => 
-		yield expression;
-	case let expression: FunctionExpression => 
-		yield expression;
-	case invalidexpression => 
-		fmt::fatal("Invalid expression encountered");
+	case let expression: AnyExpression => yield expression;
 	};
 
 	let kind: VariableKind = @undefined;
 	for (const token .. tokenizer.tokens) {
-		if (token is VariableToken) {
-			const var = token as VariableToken;
+		if (token is *VariableToken) {
+			const var = token as *VariableToken;
 			if (var.name == identifier) {
 				kind = var.kind;
 			};
 		};
 	};
 
-	append(tokenizer.tokens, VariableToken {
+	append(tokenizer.tokens, alloc(VariableToken {
 		name = identifier,
 		value = value,
 		kind = kind
-	})!;
+	})!)!;
 };
 
 fn tokenizer_is_valid_builtin(keyword: str) bool = {
@@ -847,6 +972,42 @@ fn print_lexed_symbols(lexer: Lexer) void = {
 	};
 };
 
+fn display_token_tree(tokens: []Token, indent: int=0) void = {
+	for (const some_token .. tokens) {
+		match (some_token) {
+		case let token: *FunDefToken =>
+			fmt::print("main ::= (")!;
+			for (const param .. token.proc.parameters) {
+				fmt::printf("{}: {}", param.name, expressionkind_to_str(param.kind))!;
+			};
+			fmt::print(") IS")!;
+			fmt::println()!;
+			display_token_tree(token.body.tokens[1..], 4);
+		case let token: *FuncallToken =>
+			fmt::println("FuncallToken")!;
+		case let token: *VariableToken =>
+			fmt::printfln("{} ::= {}", token.name, expression_to_str(token.value))!;
+		case let token: *IfToken =>
+			fmt::println("IfToken")!;
+		case let token: *ReturnToken =>
+			fmt::printfln("RETURN {}", expression_to_str(token.value))!;
+		case =>
+			fmt::fatal("Unknown token in global tokenizer:", token_to_tokenkind(some_token));
+		};
+	};
+
+};
+
+fn print_tokenizer_table(tokenizer: (Tokenizer | void)) void = {
+	tokenizer = match (tokenizer) {
+	case let tokenizer: Tokenizer => yield tokenizer;
+	case void => yield globalTokenizer;
+	};
+
+	const tokens = (tokenizer as Tokenizer).tokens;
+	display_token_tree(tokens);
+};
+
 fn lexer_lex_buffer(lexer: *Lexer) void = {
 	for (len(lexer.buffer) > 0) {
 		const symbol = next_lexer(lexer);
@@ -865,7 +1026,7 @@ fn get_lexed_runes(lexer_symbols: []LexSymbol, start: size = 0z, end: size = -1z
 	return result;
 };
 
-fn initiate_block_token(kind: BlockKind, fun_name: (str | void) = void) BlockToken = {
+fn initiate_block_token(kind: BlockKind, fun_name: (str | void) = void) *BlockToken = {
 	let id: str = @undefined;
 
 	if (kind == BlockKind::FUN) {
@@ -875,14 +1036,14 @@ fn initiate_block_token(kind: BlockKind, fun_name: (str | void) = void) BlockTok
 		id = gen_id();
 	};
 
-	return BlockToken {
+	return alloc(BlockToken {
 		id = id,
 		kind = kind,
 		tokens = []
-	};
+	})!;
 };
 
-fn init_blockwise_tokenizer(symbols: []LexSymbol, block: BlockToken) Tokenizer = {
+fn init_blockwise_tokenizer(symbols: []LexSymbol, block: *BlockToken) Tokenizer = {
 	const symbols_clone: []LexSymbol = [];
 	for (const symbol .. symbols) {
 		append(symbols_clone, symbol)!;
@@ -895,57 +1056,100 @@ fn init_blockwise_tokenizer(symbols: []LexSymbol, block: BlockToken) Tokenizer =
 	};
 };
 
+fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
+	let cmp: str = @undefined;
+	let expr1: AnyExpression = @undefined;
+	let expr2: AnyExpression = @undefined;
+
+	expr1 = tokenizer_parse_expression(tokenizer);
+
+	skip_empty(tokenizer);
+
+	fmt::println(peek_next(tokenizer).value)!;
+	// Supports == and !=
+	if (peek_next(tokenizer).kind == LexKind::EQUALS) {
+		next(tokenizer);
+		next_expect(tokenizer, LexKind::EQUALS);
+		cmp = "==";
+	} else if (peek_next(tokenizer).kind == LexKind::EXCLAMATION) {
+		next(tokenizer);
+		next_expect(tokenizer, LexKind::EQUALS);
+		cmp = "!=";
+	};
+
+	skip_empty(tokenizer);
+
+	expr2 = match (tokenizer_parse_expression(tokenizer)) {
+	case let expression: *Expression => yield expression;
+	case let expression: *VariableExpression => yield expression;
+	case let expression: *FunctionExpression => yield expression;
+	};
+
+	const node = alloc(IfCondNode {
+		expr1 = expr1,
+		expr2 = expr2,
+		cmp = cmp,
+		next = null,
+		next_type = null
+	})!;
+
+	skip_empty(tokenizer);
+
+	return node;
+};
+
 fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
-	next_expect(tokenizer, LexKind::WHITESPACE);
-
-	const expr1 = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: Expression => 
-		yield expression;
-	case let expression: VariableExpression => 
-		yield expression;
-	case let expression: FunctionExpression => 
-		yield expression;
-	case invalidexpression => 
-		fmt::fatal("Invalid expression encountered");
-	};
-
-	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
-
-	next_expect(tokenizer, LexKind::EQUALS);
-	next_expect(tokenizer, LexKind::EQUALS);
-
-	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
-
-	const expr2 = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: Expression => 
-		yield expression;
-	case invalidexpression => 
-		fmt::fatal("Invalid expression encountered");
-	};
+	fmt::println("Hello if")!;
+	const tree = alloc(CondTree {
+		head = null
+	})!;
 
 	next_expect(tokenizer, LexKind::WHITESPACE);
+	skip_empty(tokenizer);
 
-	fmt::println("helo if")!;
+	let prevNode: *IfCondNode = @undefined;
 
-	// do...
-	next_expect_rune(tokenizer, 'd');
-	next_expect_rune(tokenizer, 'o');
+	let keyword = "";
+	for (keyword != "do") {
+		fmt::println("KEYWORD IN IF PARSE", keyword)!;
+		const node = tokenizer_parse_if_node(tokenizer);
+		if (tree.head == null)  {
+			tree.head = node;
+			prevNode = tree.head as *IfCondNode;
+		} else {
+			prevNode.next = node;
+		};
+
+		skip_empty(tokenizer);
+
+		keyword = next_till_nonchar(tokenizer);
+
+		switch (keyword) {
+			case "and" =>
+				node.next_type = &"and";
+				for (let i = 0; i < 2; i+=1) next(tokenizer);
+				next_expect(tokenizer, LexKind::WHITESPACE);
+			case "or" => 
+				node.next_type = &"or";
+				for (let i = 0; i < 1; i+=1) next(tokenizer);
+				next_expect(tokenizer, LexKind::WHITESPACE);
+			case => break;
+		};
+	};
 
 	const block = initiate_block_token(BlockKind::IF);
 	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
 	fmt::println("parse if - parse block")!;
 	tokenizer_parse_block(&blockwise_tokenizer);
-
 	block.tokens = blockwise_tokenizer.tokens;
-
-	append(tokenizer.tokens, IfToken {
-		expr1 = expr1,
-		expr2 = expr2,
-		body = block,
-		cmp = "=="
-	})!;
-
 	tokenizer.buffer = blockwise_tokenizer.buffer;
+
+	append(tokenizer.tokens, alloc(IfToken {
+		tree = tree,
+		body = block
+	})!)!;
+
+
 	// Go ahead to avoid retokenizing from nested if tokenizer
 	for (let i = 0z; i < 4; i+= 1) {
 		next(tokenizer);
@@ -1005,45 +1209,36 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	next_expect_rune(tokenizer, 's');
 
 	next_expect(tokenizer, LexKind::NEWLINE);
+	incr_linenum();
 
 	fmt::println("helo fun")!;
 
 	const block = initiate_block_token(BlockKind::FUN, fun_name);
 	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
 
-	append(blockwise_tokenizer.tokens, FunDefToken {
+	append(blockwise_tokenizer.tokens, alloc(FunDefToken {
 		name = fun_name,
-		proc = FunDefProcToken {
+		proc = alloc(FunDefProcToken {
 			name = fun_name,
 			parameters = parameters
-		},
+		})!,
 		body = block
-	})!;
+	})!)!;
 
-	fmt::println("parse fun - parse block")!;
 	tokenizer_parse_block(&blockwise_tokenizer);
 
-	for (const token .. blockwise_tokenizer.tokens) {
-		fmt::println(token_to_tokenkind(token))!;
-	};
-
-	fmt::println("count", len(blockwise_tokenizer.buffer))!;
-	fmt::println("count", len(blockwise_tokenizer.tokens))!;
 	block.tokens = blockwise_tokenizer.tokens;
 
-	append(tokenizer.tokens, FunDefToken {
+	append(tokenizer.tokens, alloc(FunDefToken {
 		name = fun_name,
-		proc = FunDefProcToken {
+		proc = alloc(FunDefProcToken {
 			name = fun_name,
 			parameters = parameters
-		},
+		})!,
 		body = block
-	})!;
+	})!)!;
 
 	tokenizer.buffer = blockwise_tokenizer.buffer;
-
-
-	fmt::println("we exit here")!;
 
 	// Go ahead to avoid retokenizing from nested if tokenizer
 	for (let i = 0z; i < 4; i+= 1) {
@@ -1083,9 +1278,8 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 	for (!tokenizer_should_stop(tokenizer)) {
 		// could not find end before buffer ran out
 		if (len(tokenizer.buffer) < 3) {
-			fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as BlockToken).id);
+			fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as *BlockToken).id);
 		};
-		fmt::println("TOKENIZING FOR BLOCK TOKEN !", (tokenizer.block as BlockToken).id)!;
 
 		fmt::println("pre: ", peek_next(tokenizer).value)!;
 		const keyword = next_till_nonchar_or_nondigit(tokenizer);
@@ -1116,7 +1310,12 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		} else if (keyword == "if") {
 			tokenizer_parse_if(tokenizer);
 		} else if (keyword == "return") {
-			append(tokenizer.tokens, ReservedKeywordToken::RETURN)!;
+			next_expect(tokenizer, LexKind::WHITESPACE);
+			const value = tokenizer_parse_expression(tokenizer);
+			match (value) {
+			case let x: *Expression => fmt::println("x value size", x.value_size, strings::fromutf8_unsafe(x.value))!;
+			};
+			append(tokenizer.tokens, alloc(ReturnToken { value = value })!)!;
 		} else if (keyword != "") {
 			if (tokenizer_is_valid_variable(keyword)) {
 				tokenizer_parse_variable_assign(tokenizer, keyword);
@@ -1124,17 +1323,14 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		};
 
 		// increment internal linenum counter if was new line
-		if (peek_next(tokenizer).kind == LexKind::NEWLINE) {
-			tokenizer.linenum += 1;
-			globalTokenizer.linenum += 1;
-		};
+		if (peek_next(tokenizer).kind == LexKind::NEWLINE) incr_linenum();
 	};
 
 	fmt::println("buf length:", len(tokenizer.buffer))!;
 	fmt::println(lexkind_to_rune(tokenizer.buffer[0].kind))!;
 	fmt::println("Hello?")!;
 	if (len(tokenizer.buffer) < 3) {
-		fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as BlockToken).id);
+		fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as *BlockToken).id);
 	};
 };
 
@@ -1154,7 +1350,7 @@ fn qbe_commit(qbe: Qbe, file: io::file) void = {
 	io::write(file, bytes)!;
 };
 
-fn qbe_define_literal_str(qbe: *Qbe, name: str, expression: Expression) Qbe_Variable = {
+fn qbe_define_literal_str(qbe: *Qbe, name: str, expression: *Expression, src_identifier: (str | void) = void) Qbe_Variable = {
 	fmt::println("name:", name)!;
 	const found = qbe_globals_find_var_by_val(qbe, expression.value);
 	if (!(found is void)) fmt::println("found:", (found as Qbe_Variable).text)!;
@@ -1176,7 +1372,7 @@ fn qbe_define_literal_str(qbe: *Qbe, name: str, expression: Expression) Qbe_Vari
 
 		},
 		kind = expression.kind,
-		src_variable = void,
+		src_variable = src_identifier,
 		value = expression,
 		text = result,
 		is_emitted = false
@@ -1207,39 +1403,63 @@ fn qbe_define_expression(data_label: str, expression: Expression) str = {
 	};
 };
 
-fn qbe_define_funcall_args(qbe: *Qbe, arguments: []AnyExpression) str = {
+fn qbe_define_funcall_args(qbe: *Qbe, arguments: *ExprTree) str = {
 	const call_args: []str = [];
-	for (const arg .. arguments) {
-		match (arg) {
-		case let arg: Expression =>
-			fmt::println("arg is plain expr, value:", strings::fromutf8_unsafe(arg.value))!;
-			switch (arg.kind) {
-			case ExpressionKind::INT =>
-				const integer = qbe_define_literal_integer(qbe, arg.value);
-				fmt::println("WRITING INTEGER")!;
-				qbe_write(qbe, (integer.text as str))!;
-				append(call_args, format("l {}", qbe_show_reg(integer.reg)))!;
-			case ExpressionKind::STR =>
-				const label = qbe_get_data_label();
-				const data = qbe_define_literal_str(qbe, label, arg);
-				qbe_write_noindent(qbe, (data.text as str), Qbe_WritePositionKind::PREPEND)!;
-				append(call_args, format("l {}", data.reg.reg))!;
+	if (arguments.head != null) {
+		let node = ll_head(arguments: *LinkedList);
+		for (node != null) {
+			const value = (node.value: *ExprTreeNode).value;
+			match (value) {
+			case let arg: *Expression =>
+				fmt::println("arg is plain expr, value:", strings::fromutf8_unsafe(arg.value))!;
+				switch (arg.kind) {
+				case ExpressionKind::INT =>
+					const integer = qbe_define_literal_integer(qbe, arg.value);
+					fmt::println("WRITING INTEGER")!;
+					qbe_write(qbe, (integer.text as str))!;
+					append(call_args, format("l {}", qbe_show_reg(integer.reg)))!;
+				case ExpressionKind::STR =>
+					const label = qbe_get_data_label();
+					const data = qbe_define_literal_str(qbe, label, arg);
+					qbe_write_noindent(qbe, (data.text as str), Qbe_WritePositionKind::PREPEND)!;
+					append(call_args, format("l {}", data.reg.reg))!;
+				};
+
+			case let arg: *FunctionExpression => unimplemented("FUNCTION EXPR NOT IMPLEMENTED");
+			case let arg: *VariableExpression => 
+				fmt::println("arg", arg.name)!;
+				const result = qbe_scope_find_var_by_src_var(qbe, arg.name);
+				match (result) {
+				case let var: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(var.reg)))!;
+				case void => fmt::fatal("Could not find variable");
+				};
 			};
 
-		case let arg: FunctionExpression => unimplemented("FUNCTION EXPR NOT IMPLEMENTED");
-		case let arg: VariableExpression => 
-			fmt::println("arg", arg.name)!;
-			const result = qbe_scope_find_var_by_src_var(qbe, arg.name);
-			match (result) {
-			case let var: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(var.reg)))!;
-			case void => append(call_args, format("EMPTY"))!;
-			};
+			fmt::println("define args", node.next)!;
+			if (node.next == null) break;
+			node = node.next: *LinkedListNode;
 		};
 	};
 
 	const result =  join(call_args, ", ");
 	fmt::println("result", result)!;
 	return result;
+};
+
+fn ll_len(tree: *LinkedList) size = {
+	if (tree.head == null) return 0;
+	let node: *LinkedListNode = tree.head as *LinkedListNode;
+	let i = 1z;
+	for (node.next != null) {
+		fmt::println("Next to head", node.next)!;
+		if (node.next is null) {
+			fmt::println("next is null")!;
+		};
+		node = node.next as *LinkedListNode;
+		i += 1;
+	};
+
+	return i;
 };
 
 fn qbe_define_funcall(qbe: *Qbe, token: FuncallToken) str = {
@@ -1252,14 +1472,14 @@ fn qbe_define_funcall(qbe: *Qbe, token: FuncallToken) str = {
 	};
 
 	// No args
-	if (len(token.arguments) == 0) {
+	if (ll_len(token.arguments: *LinkedList) == 0) {
 		text = format("call ${}()\n", token.name);
 		return text;
 	};
 
-	const argumnts = qbe_define_funcall_args(qbe, token.arguments);
+	const arguments = qbe_define_funcall_args(qbe, token.arguments);
 
-	text = format("call ${}({})\n", token.name, argumnts);
+	text = format("call ${}({})\n", token.name, arguments);
 	return text;
 
 };
@@ -1335,11 +1555,11 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Va
 		reg = reg,
 		kind = data_kind,
 		src_variable = data_identifier,
-		value = Expression {
+		value = alloc(Expression {
 			kind = data_kind,
 			value = data,
 			value_size = data_sz
-		},
+		})!,
 		text = text,
 		is_emitted = false
 	};
@@ -1350,13 +1570,14 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Va
 };
 
 fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
+	fmt::println("Writing and defining variable datum")!;
 	const datum = qbe_define_datum(qbe, token.value, token.name);
 	qbe_write_datum(qbe, datum);
 };
 
 fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void) = void) Qbe_Variable = {
 	match (expr) {
-	case let expr: Expression => 
+	case let expr: *Expression => 
 		fmt::println("datum is primitive")!;
 		const value = expr.value;
 		const value_size = expr.value_size;
@@ -1378,15 +1599,16 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 
 		// Other easy case: is it literal string?
 		if (kind == VariableKind::STR) {
-			const data = qbe_define_literal_str(qbe, qbe_get_data_label(), expr);
+			const data = qbe_define_literal_str(qbe, qbe_get_data_label(), expr, src_identifier);
 			return data;
 		};
 
-		const allocation = qbe_define_allocation(qbe, value_size, value, kind);
+		const allocation = qbe_define_allocation(qbe, value_size, value, kind, src_identifier);
 		return allocation;
-	case let expr: FunctionExpression => 
+	case let expr: *FunctionExpression => 
 		fmt::println("datum is function")!;
 		const reg = qbe_get_reg_label();
+		const text = indent(format("{} =l call ${}({})", qbe_show_reg(reg), expr.name, qbe_define_funcall_args(qbe, expr.arguments)), qbe.indent_level);
 		const var = Qbe_Variable {
 			reg = reg,
 			src_variable = src_identifier,
@@ -1394,31 +1616,32 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			value = void,
 			// must recursively expand args tho... since qbe doesn't
 			// support inline calls
-			text = format("{} =l call ${}({})", qbe_show_reg(reg), expr.name, qbe_define_funcall_args(qbe, expr.arguments)),
+			text = text,
 			is_emitted = false
 		};
 		qbe_scope_add_variable(qbe, var);
 		return var;
-	case let expr: VariableExpression => 
+	case let expr: *VariableExpression => 
 		fmt::println("datum is variable")!;
 		const result = qbe_scope_find_var_by_src_var(qbe, expr.name);
 		fmt::println("found variable result")!;
 		match (result) {
 		case let var: Qbe_Variable => 
 			const identifier = qbe_get_reg_label();
+			const text = indent(format("{} =l copy {}", qbe_show_reg(identifier), qbe_show_reg(var.reg)), qbe.indent_level);
 			const new_var = Qbe_Variable {
 				reg = identifier,
 				src_variable = src_identifier,
 				value = var.value,
 				kind = var.kind,
-				text = format("{} =l copy {}", qbe_show_reg(identifier), qbe_show_reg(var.reg)),
+				text = text,
 				is_emitted = false
 			};
 			qbe_scope_add_variable(qbe, new_var);
 			return new_var;
 		case void => fmt::fatal("COULD NOT FIND RESULT IN DEFINE DATUM");
 		};
-	case => fmt::fatal("Incorrect expr type encountered while writing datum");
+	case => fmt::fatal("Incorrect expr type encountered while writing datum",);
 	};
 };
 
@@ -1431,11 +1654,11 @@ fn qbe_define_literal_integer(qbe: *Qbe, data: []u8, src_identifier: (str | void
 		reg = reg,
 		src_variable = src_identifier,
 		kind = ExpressionKind::INT,
-		value = Expression {
+		value = alloc(Expression {
 			value = data,
 			value_size = 8,
 			kind = ExpressionKind::INT,
-		},
+		})!,
 		text = text,
 		is_emitted = false
 	};
@@ -1478,46 +1701,60 @@ fn qbe_regs_are_equal(reg1: Qbe_Identifier, reg2: Qbe_Identifier) bool = {
 };
 
 fn qbe_scope_find_var_by_reg(qbe: *Qbe, reg_to_find: Qbe_Identifier) (Qbe_Variable | void)  = {
-	for (let i = len(qbe.scope.variables) - 1; i >= 0; i -= 1) {
-		const variable = qbe.scope.variables[i];
-		if (qbe_regs_are_equal(variable.reg, reg_to_find)) {
-			return variable;
+	fmt::println("checking")!;
+	for (const scope .. qbe.scopes) {
+		if (len(scope.variables) < 1) continue;
+		for (let i = len(scope.variables) - 1; i >= 0 && i < len(scope.variables); i -= 1) {
+			const variable = scope.variables[i];
+			if (qbe_regs_are_equal(variable.reg, reg_to_find)) {
+				return variable;
+			};
 		};
 	};
+
 	return void;
 };
 
 fn qbe_globals_find_var_by_val(qbe: *Qbe, value_to_find: []u8) (Qbe_Variable | void)  = {
-	if (len(qbe.datas) == 0) return void;
-	for (let i = len(qbe.datas) - 1; i >= 0; i -= 1) {
-		const variable = qbe.datas[i];
-		if (variable.value is void) continue;
-		const expr: Expression = (variable.value as Expression);
-		const value = expr.value;
-		const as_str = strings::fromutf8_unsafe(value); 
-		if (as_str == "") continue;
-		if (len(value) >= 0 && len(value_to_find) >= 0 && len(value) < len(value_to_find) || len(value) > len(value_to_find)) continue;
-		let found = false;
-		for (let i = 0z; i < len(value_to_find) - 1; i += 1) {
-			fmt::println("Arg", value_to_find[i], variable.reg.reg)!;
-			if (value_to_find[i] != value[i]) {
-				found = false;
+	for (const scope .. qbe.scopes) {
+		fmt::println(scope.id, len(scope.variables))!;
+		if (len(scope.variables) < 1) continue;
+		for (let i = len(scope.variables) - 1; i >= 0 && i < len(scope.variables); i -= 1) {
+			fmt::println(i)!;
+			const variable = scope.variables[i];
+			if (variable.value is void) continue;
+			const expr: *Expression = (variable.value as *Expression);
+			const value = expr.value;
+			const as_str = strings::fromutf8_unsafe(value); 
+			if (as_str == "") continue;
+			if (len(value) >= 0 && len(value_to_find) >= 0 && len(value) < len(value_to_find) || len(value) > len(value_to_find)) continue;
+			let found = false;
+			for (let i = 0z; i < len(value_to_find) - 1; i += 1) {
+				fmt::println("Arg", value_to_find[i], variable.reg.reg)!;
+				if (value_to_find[i] != value[i]) {
+					found = false;
 
+				};
 			};
-		};
-		if (found) {
-			return variable;
+			if (found) {
+				return variable;
+			};
 		};
 	};
 	return void;
 };
 
 fn qbe_scope_find_var_by_src_var(qbe: *Qbe, src_var_to_find: str) (Qbe_Variable | void) = {
-	fmt::println(len(qbe.scope.variables))!;
-	for (let i = len(qbe.scope.variables) - 1; i >= 0; i -= 1) {
-		const variable = qbe.scope.variables[i];
-		if (variable.src_variable is str && (variable.src_variable as str) == src_var_to_find) {
-			return variable;
+	for (const scope .. qbe.scopes) {
+		if (len(scope.variables) < 1) continue;
+		fmt::println(len(scope.variables), scope.variables[0].text)!;
+		for (let i = len(scope.variables) - 1; i >= 0 && i < len(scope.variables); i -= 1) {
+			fmt::println("i", i)!;
+			const variable = scope.variables[i];
+			fmt::println(variable.src_variable, src_var_to_find)!;
+			if (variable.src_variable is str && (variable.src_variable as str) == src_var_to_find) {
+				return variable;
+			};
 		};
 	};
 	return void;
@@ -1531,11 +1768,13 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	// };
 
 	// No args
-	if (len(token.arguments) == 0) {
+	fmt::println(ll_nth(token.arguments: *LinkedList, 0))!;
+	if (ll_len(token.arguments: *LinkedList) == 0) {
 		qbe_write(qbe, format("call ${}()\n", token.name))!;
 		return;
 	};
 
+	fmt::println("write funcall")!;
 	const arguments = qbe_define_funcall_args(qbe, token.arguments);
 
 	qbe_write(qbe, format("call ${}({})\n", token.name, arguments))!;
@@ -1566,49 +1805,37 @@ fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 };
 
 fn qbe_scope_add_variable(qbe: *Qbe, variable: Qbe_Variable) void = {
-	// assert(variable.src_variable is str);
-	append(qbe.scopes[len(qbe.scopes) - 1].variables, variable)!;
-	qbe.scope = qbe.scopes[len(qbe.scopes) - 1];
+	fmt::println("adding variable")!;
+	const scope = qbe.scopes[len(qbe.scopes) - 1];
+	append(scope.variables, clone_qbe_variable(variable))!;
+	for (const v .. scope.variables) {
+		fmt::println("v before:", v.text)!;
+	};
 	fmt::printfln("adding {} to {}", variable.src_variable, qbe.scopes[len(qbe.scopes) - 1].id)!;
 };
 
 fn qbe_add_global_data(qbe: *Qbe, variable: Qbe_Variable) void = {
-	append(qbe.datas, variable)!;
+	const scope = qbe.scopes[0];
+	fmt::println("Here", len(scope.variables))!;
+	append(scope.variables, clone_qbe_variable(variable))!;
 };
 
 fn qbe_scope_push(qbe: *Qbe, scope_id: str, scope_kind: Qbe_ScopeKind) void = {
 	// TODO: push current scope items into new scope.
 	// this means to treat the scope as a sort-of *stack*.
 	
-	fmt::println("push to scope", scope_id)!;
-	const variables: []Qbe_Variable = [];
-
-	if (len(qbe.scopes) == 1) {
-		for (const data .. qbe.datas) {
-			append(variables, data)!;
-		};
-	};
-
-	for (const scope .. qbe.scopes[1..]) {
-		fmt::println("here!", scope.id)!;
-		for (const var .. scope.variables) {
-			fmt::println("here 2", var.src_variable)!;
-			append(variables, var)!;
-		};
-	};
-
-	const new_scope = Qbe_Scope {
+	const new_scope: *Qbe_Scope = alloc(Qbe_Scope {
 		id = scope_id,
 		kind = scope_kind,
-		variables = variables
-	};
+		variables = []
+	})!;
 
 	append(qbe.scopes, new_scope)!;
-
 	qbe.scope = new_scope;
 };
 
 fn qbe_scope_pop(qbe: *Qbe) void = {
+	assert(len(qbe.scopes) > 1);
 	fmt::println("popping scope")!;
 	delete(qbe.scopes[len(qbe.scopes) - 1]);
 	qbe.scope = qbe.scopes[len(qbe.scopes) - 1];
@@ -1632,13 +1859,13 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	if (token.name == "main") {
 		qbe_write(qbe, "export function w $main() {")!;
 	} else {
-		qbe_write(qbe, format("function w ${}({}) {{", token.name, qbe_define_function_parameters(qbe, token.proc)))!;
+		qbe_write(qbe, format("function w ${}({}) {{", token.name, qbe_define_function_parameters(qbe, *token.proc)))!;
 	};
 
 	qbe_write(qbe, "@start")!;
 	qbe_write(qbe, format("@this"))!;
 	qbe_set_indent(qbe, 4);
-	qbe_write_block(qbe, token.body);
+	qbe_write_block(qbe, *token.body);
 	qbe_set_indent(qbe, 0);
 	qbe_write(qbe, "}")!;
 	qbe_scope_pop(qbe);
@@ -1646,19 +1873,17 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 
 fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 	for (const token .. token.tokens) {
-		if (token is ReservedKeywordToken) {
-			switch (token as ReservedKeywordToken) {
-			case ReservedKeywordToken::RETURN => 
-				qbe_write(qbe, "ret 0")!;
-			};
+		if (token is *ReturnToken) {
+			const datum = qbe_define_datum(qbe, (token as *ReturnToken).value);
+			qbe_write_datum(qbe, datum);
+			qbe_write(qbe, format("ret {}", qbe_show_reg(datum.reg)))!;
 		};
-		if (token is FuncallToken) {
-			qbe_write_funcall(qbe, token as FuncallToken);
-		} else if (token is VariableToken) {
-			qbe_write_variable(qbe, token as VariableToken);
-		} else if (token is IfToken) {
-			fmt::println("if token")!;
-			qbe_write_if(qbe, token as IfToken);
+		if (token is *FuncallToken) {
+			qbe_write_funcall(qbe, *(token as *FuncallToken));
+		} else if (token is *VariableToken) {
+			qbe_write_variable(qbe, *(token as *VariableToken));
+		} else if (token is *IfToken) {
+			qbe_write_if(qbe, *(token as *IfToken));
 		};
 	};
 
@@ -1680,43 +1905,55 @@ fn qbe_write_datum(qbe: *Qbe, datum: Qbe_Variable) void = {
 };
 
 fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
-	const expr1alloc = qbe_define_datum(qbe, token.expr1);
-	const expr2alloc = qbe_define_datum(qbe, token.expr2);
-	qbe_write(qbe, "# if's datums")!;
-	qbe_write_datum(qbe, expr1alloc);
-	qbe_write_datum(qbe, expr2alloc);
-	qbe_write(qbe, "# end")!;
-	switch (token.cmp) {
-	case "==" =>
-		let cmpreg1: Qbe_Identifier = @undefined;
-		let cmpreg2: Qbe_Identifier = @undefined;
+	let node = token.tree.head;
+	fmt::println("node:", node)!;
+	for (node != null) {
+		const expr1 = (node as *IfCondNode).expr1;
+		const expr2 = (node as *IfCondNode).expr2;
+		const cmp = (node as *IfCondNode).cmp;
+		const expr1alloc = qbe_define_datum(qbe, expr1);
+		const expr2alloc = qbe_define_datum(qbe, expr2);
+		qbe_write(qbe, "# if's datums")!;
+		qbe_write_datum(qbe, expr1alloc);
+		qbe_write_datum(qbe, expr2alloc);
+		qbe_write(qbe, "# end")!;
+		switch (cmp) {
+		case "==" =>
+			let cmpreg1: Qbe_Identifier = @undefined;
+			let cmpreg2: Qbe_Identifier = @undefined;
 
-		if (expr1alloc.kind != expr2alloc.kind) {
-			fmt::fatal("TYPE_ERROR: cannot compare different data types");
+			if (expr1alloc.kind != expr2alloc.kind) {
+				fmt::fatal("TYPE_ERROR: cannot compare different data types");
+			};
+
+			// Guaranteed to be same after ^
+			const data_kind = expr1alloc.kind;
+
+			switch (data_kind) {
+			case Qbe_VariableDataKind::STR =>
+				cmpreg1 = expr1alloc.reg;
+				cmpreg2 = expr2alloc.reg;
+				qbe_write(qbe, format("%eql  =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+			case Qbe_VariableDataKind::INT =>
+				cmpreg1 = expr1alloc.reg;
+				cmpreg2 = expr2alloc.reg;
+				qbe_write(qbe, format("%eql =l ceql {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+			};
+		case =>
+			unimplemented("1611");
 		};
-
-		// Guaranteed to be same after ^
-		const data_kind = expr1alloc.kind;
-
-		switch (data_kind) {
-		case Qbe_VariableDataKind::STR =>
-		 	cmpreg1 = expr1alloc.reg;
-		 	cmpreg2 = expr2alloc.reg;
-		 	qbe_write(qbe, format("%eql  =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
-		case Qbe_VariableDataKind::INT =>
-		 	cmpreg1 = expr1alloc.reg;
-		 	cmpreg2 = expr2alloc.reg;
-			qbe_write(qbe, format("%eql =l ceql {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
-		};
-	case =>
-		unimplemented("1611");
+		const curr_ifi = ifi;
+		ifi += 1;
+		qbe_write(qbe, format("jnz %eql, @if{}t, @if{}f", curr_ifi, curr_ifi))!;
+		qbe_write_noindent(qbe, format("@if{}t", curr_ifi))!;
+		qbe_scope_push(qbe, "if", Qbe_ScopeKind::IF);
+		qbe_write_block(qbe, *token.body);
+		qbe_scope_pop(qbe);
+		qbe_write_noindent(qbe, format("@if{}f", curr_ifi))!;
+		node = (node as *IfCondNode).next;
 	};
-	qbe_write(qbe, format("jnz %eql, @ifstart, @ifend"))!;
-	qbe_write_noindent(qbe, "@ifstart")!;
-	qbe_scope_push(qbe, "if", Qbe_ScopeKind::IF);
-	qbe_write_block(qbe, token.body);
-	qbe_scope_pop(qbe);
-	qbe_write_noindent(qbe, "@ifend")!;
+
+
 };
 
 export fn main() void = {
@@ -1726,6 +1963,55 @@ export fn main() void = {
 	if (input_file is void) {
 		fmt::println("No input file provided. Exiting")!;
 		os::exit(1);
+	};
+
+	const tree = create_expr_tree();
+
+	const node = create_expr_node(alloc(Expression {
+		value = [65, 66, 67],
+		value_size = 8,
+		kind = ExpressionKind::INT
+	})!);
+
+	fmt::println("wtf?", node.next)!;
+
+	const node2 = create_expr_node(alloc(Expression {
+		value = [0],
+		value_size = 8,
+		kind = ExpressionKind::INT
+	})!);
+
+	const node3 = create_expr_node(alloc(Expression {
+		value = [0],
+		value_size = 8,
+		kind = ExpressionKind::INT
+	})!);
+
+	fmt::println("1")!;
+	const x = alloc(Expression {
+		value = [65, 66, 67],
+		value_size = 24,
+		kind = ExpressionKind::INT
+	})!;
+	ll_push(tree: *LinkedList, node);
+	fmt::println()!;
+	// fmt::println("2")!;
+	// ll_push(tree: *LinkedList, node2: *LinkedListNode);
+	// ll_show(tree: *LinkedList);
+	// fmt::println()!;
+	// fmt::println("3")!;
+	// ll_push(tree: *LinkedList, node3: *LinkedListNode);
+	// ll_show(tree: *LinkedList);
+	// fmt::println()!;
+	// fmt::println("4")!;
+	// ll_show(tree: *LinkedList);
+	// fmt::println()!;
+
+	// const value =  (tree.head: *LinkedListNode).value;
+	const value = (ll_head(tree: *LinkedList): *LinkedListNode).value;
+	const expr = value: *ExprTreeNode;
+	match (expr.value) {
+	case let x: *Expression => fmt::println(strings::fromutf8_unsafe(x.value))!;
 	};
 
 	// flags
@@ -1764,13 +2050,15 @@ export fn main() void = {
 	// Parse globally
 	tokenizer_parse_buffer(&globalTokenizer);
 
+	print_tokenizer_table(globalTokenizer);
+
 	// Initialize qbe struct and prefill the buffer with base utilities and
 	// functions
 	const qbe = qbe_initialize("./base.qbe");
 
 	for (const token .. globalTokenizer.tokens) {
-		if (token is FunDefToken) {
-			qbe_write_function(&qbe, token as FunDefToken);
+		if (token is *FunDefToken) {
+			qbe_write_function(&qbe, *(token as *FunDefToken));
 		};
 		// else if (token is FuncallToken) {
 		// 	qbe_write_funcall(&qbe, token as FuncallToken);
