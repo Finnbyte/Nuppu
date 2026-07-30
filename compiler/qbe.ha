@@ -719,7 +719,6 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	};
 
 	qbe_write(qbe, "@start")!;
-	qbe_write(qbe, format("@this"))!;
 	qbe_set_indent(qbe, 4);
 	qbe_write_block(qbe, *token.body);
 	qbe_set_indent(qbe, 0);
@@ -728,7 +727,8 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 };
 
 fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
-	for (const token .. token.tokens) {
+	let index = 0;
+	for (const token .. token.tokens[1..]) {
 		if (token is *ReturnToken) {
 			const datum = qbe_define_datum(qbe, (token as *ReturnToken).value);
 			qbe_write_datum(qbe, datum);
@@ -740,7 +740,17 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 			qbe_write_variable(qbe, *(token as *VariableToken));
 		} else if (token is *IfToken) {
 			qbe_write_if(qbe, *(token as *IfToken));
+		} else if (token is *LabelToken) {
+			qbe_write(qbe, format("@{}", (token as *LabelToken).name))!;
+		} else if (token is *GoToken) {
+			fmt::println("index", index)!;
+			if (index == 0) {
+				fmt::fatalf("Can't jmp as first statement inside a function (\"go {}\")", (token as *GoToken).label);
+			};
+			qbe_write(qbe, format("jmp @{}", (token as *GoToken).label))!;
+			qbe_write(qbe, format("@{}_NO", (token as *GoToken).label))!;
 		};
+		index += 1;
 	};
 
 	// if (qbe.scope.kind == Qbe_ScopeKind::FUN) {
@@ -772,6 +782,7 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		qbe_write_datum(qbe, expr1alloc);
 		qbe_write_datum(qbe, expr2alloc);
 		qbe_write(qbe, "# end")!;
+		fmt::println("halo",cmp)!;
 		switch (cmp) {
 		case "==" =>
 			let cmpreg1: Qbe_Identifier = @undefined;

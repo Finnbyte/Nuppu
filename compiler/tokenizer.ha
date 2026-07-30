@@ -34,6 +34,10 @@ type LabelToken = struct {
 	name: str
 };
 
+type GoToken = struct {
+	label: str
+};
+
 type invalidexpression = !void;
 
 type VariableKind = ExpressionKind;
@@ -59,7 +63,7 @@ type IfToken = struct {
 	body: *BlockToken
 };
 
-type Token = (*VariableToken | *FuncallToken | *IfToken | *FunDefToken | *ReturnToken | *LabelToken);
+type Token = (*VariableToken | *FuncallToken | *IfToken | *FunDefToken | *ReturnToken | *LabelToken | *GoToken);
 
 type VariableToken = struct {
 	kind: VariableKind,
@@ -138,6 +142,8 @@ fn token_to_tokenkind(token: Token) str = {
 	case *FuncallToken => return "FuncallToken";
 	case *FunDefToken => return "FunDefToken";
 	case *ReturnToken => return "ReturnToken";
+	case *LabelToken => return "LabelToken";
+	case *GoToken => return "GoToken";
 	};
 };
 
@@ -258,6 +264,8 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 	skip_empty(tokenizer);
 
 	// Supports == and !=
+	fmt::println(peek_next(tokenizer).value)!;
+	fmt::println("HERE")!;
 	if (peek_next(tokenizer).kind == LexKind::EQUALS) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
@@ -294,6 +302,7 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 		head = null
 	})!;
 
+	// after "if"
 	next_expect(tokenizer, LexKind::WHITESPACE);
 	skip_empty(tokenizer);
 
@@ -312,6 +321,7 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 		skip_empty(tokenizer);
 
 		keyword = next_till_nonchar(tokenizer);
+		fmt::println("keyword", keyword)!;
 
 		switch (keyword) {
 			case "and" =>
@@ -322,7 +332,8 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 				node.next_type = &"or";
 				for (let i = 0; i < 1; i+=1) next(tokenizer);
 				next_expect(tokenizer, LexKind::WHITESPACE);
-			case => break;
+			case "do" => break;
+			case => next(tokenizer);
 		};
 	};
 
@@ -488,6 +499,10 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		// Check keyword
 		if (peek_next(tokenizer).kind == LexKind::PAREN_OPEN) {
 			tokenizer_parse_funcall(tokenizer, keyword);
+		} else if (keyword == "go") {
+			next_expect(tokenizer, LexKind::WHITESPACE);
+			const label_name = next_till_nonchar_or_nondigit(tokenizer);
+			append(tokenizer.tokens, alloc(GoToken { label = label_name })!)!;
 		} else if (keyword == "fun") {
 			tokenizer_parse_fun(tokenizer);
 		} else if (keyword == "let") {
@@ -521,7 +536,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 fn next_expect(tokenizer: *Tokenizer, expected_kind: LexKind, index: size = 0) void = {
 	if (expected_kind != tokenizer.buffer[index].kind) {
 		const actual_kind = tokenizer.buffer[index].kind;
-		fmt::fatalf("{}: Expected '{}', got '{}'", linenum(), lexkind_to_rune(expected_kind), lexkind_to_rune(actual_kind));
+		panic(format("{}: Expected '{}', got '{}'", linenum(), lexkind_to_rune(expected_kind), lexkind_to_rune(actual_kind)))!;
 	} else {
 		delete(tokenizer.buffer[0]);
 	};
@@ -797,6 +812,7 @@ fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void 
 	// skip space before '='
 	skip_empty(tokenizer);
 
+	fmt::println("höre")!;
 	next_expect(tokenizer, LexKind::EQUALS);
 
 	// skip space after '='
@@ -822,6 +838,57 @@ fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void 
 		kind = kind
 	})!)!;
 };
+
+fn display_token_tree(tokens: []Token, indent: int=0) void = {
+	for (const some_token .. tokens) {
+		match (some_token) {
+		case let token: *FunDefToken =>
+			fmt::print("FUN main ::= (")!;
+			for (const param .. token.proc.parameters) {
+				fmt::printf("{}: {}", param.name, expressionkind_to_str(param.kind))!;
+			};
+			fmt::print(") IS")!;
+			fmt::println()!;
+			display_token_tree(token.body.tokens[1..], 4);
+			fmt::println("END\n")!;
+		case let token: *FuncallToken =>
+			const args: []str = [];
+			const tree = token.arguments; 
+			if (!ll_empty(tree: *LinkedList)) {
+				const node = ll_first(tree: *LinkedList);
+				for (node != null) {
+					const exprNode = (node: *LinkedListNode).value: *ExprTreeNode;
+					append(args, expression_to_str(exprNode.value))!;
+					node = (node: *LinkedListNode).next;
+				};
+			};
+
+			fmt::printfln("{}({})", token.name, join(args, ", "))!;
+		case let token: *VariableToken =>
+			fmt::printfln("{} ::= {}", token.name, expression_to_str(token.value))!;
+		case let token: *IfToken =>
+			fmt::println("IfToken")!;
+		case let token: *ReturnToken =>
+			fmt::printfln("RETURN {}", expression_to_str(token.value))!;
+		case let token: *LabelToken =>
+			fmt::printfln("LABEL {}", token.name)!;
+		case let token: *GoToken =>
+			fmt::printfln("GO @{}", token.label)!;
+		};
+	};
+
+};
+
+fn print_tokenizer_table(tokenizer: (Tokenizer | void)) void = {
+	tokenizer = match (tokenizer) {
+	case let tokenizer: Tokenizer => yield tokenizer;
+	case void => yield globalTokenizer;
+	};
+
+	const tokens = (tokenizer as Tokenizer).tokens;
+	display_token_tree(tokens);
+};
+
 
 fn next_till_keyword(tokenizer: *Tokenizer, keyword: str) (str | void) = {
 	const buf: []rune = [];

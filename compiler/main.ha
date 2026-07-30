@@ -27,6 +27,11 @@ const ALIGNMENT: size = 4;
 
 const globalTokenizer: Tokenizer = @undefined;
 
+fn itoa(num: (size | int)) str = {
+	return format("{}", num);
+};
+
+
 fn pass() void = {
 	return void;
 };
@@ -73,52 +78,11 @@ export fn read_file_contents(file_path: str, include_null_terminator: bool = tru
 };
 
 
-fn display_token_tree(tokens: []Token, indent: int=0) void = {
-	for (const some_token .. tokens) {
-		match (some_token) {
-		case let token: *FunDefToken =>
-			fmt::print("FUN main ::= (")!;
-			for (const param .. token.proc.parameters) {
-				fmt::printf("{}: {}", param.name, expressionkind_to_str(param.kind))!;
-			};
-			fmt::print(") IS")!;
-			fmt::println()!;
-			display_token_tree(token.body.tokens[1..], 4);
-			fmt::println("END")!;
-		case let token: *FuncallToken =>
-			const args: []str = [];
-			const tree = token.arguments; 
-			if (!ll_empty(tree: *LinkedList)) {
-				const node = ll_first(tree: *LinkedList);
-				for (node != null) {
-					const exprNode = (node: *LinkedListNode).value: *ExprTreeNode;
-					append(args, expression_to_str(exprNode.value))!;
-					node = (node: *LinkedListNode).next;
-				};
-			};
+type panicerror = !void;
 
-			fmt::printfln("{}({})", token.name, join(args, ", "))!;
-		case let token: *VariableToken =>
-			fmt::printfln("{} ::= {}", token.name, expression_to_str(token.value))!;
-		case let token: *IfToken =>
-			fmt::println("IfToken")!;
-		case let token: *ReturnToken =>
-			fmt::printfln("RETURN {}", expression_to_str(token.value))!;
-		case =>
-			fmt::fatal("Unknown token in global tokenizer:", token_to_tokenkind(some_token));
-		};
-	};
-
-};
-
-fn print_tokenizer_table(tokenizer: (Tokenizer | void)) void = {
-	tokenizer = match (tokenizer) {
-	case let tokenizer: Tokenizer => yield tokenizer;
-	case void => yield globalTokenizer;
-	};
-
-	const tokens = (tokenizer as Tokenizer).tokens;
-	display_token_tree(tokens);
+fn panic(msg: str) (panicerror | void) = {
+	fmt::println(msg)!;
+	return panicerror;
 };
 
 // shorthand to fmt::asprintf that automatically crashes program if fails.
