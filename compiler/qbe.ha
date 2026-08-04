@@ -728,7 +728,7 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 
 fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 	let index = 0;
-	for (const token .. token.tokens[1..]) {
+	for (const token .. token.tokens) {
 		if (token is *ReturnToken) {
 			const datum = qbe_define_datum(qbe, (token as *ReturnToken).value);
 			qbe_write_datum(qbe, datum);
@@ -744,11 +744,7 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 			qbe_write(qbe, format("@{}", (token as *LabelToken).name))!;
 		} else if (token is *GoToken) {
 			fmt::println("index", index)!;
-			if (index == 0) {
-				fmt::fatalf("Can't jmp as first statement inside a function (\"go {}\")", (token as *GoToken).label);
-			};
 			qbe_write(qbe, format("jmp @{}", (token as *GoToken).label))!;
-			qbe_write(qbe, format("@{}_NO", (token as *GoToken).label))!;
 		};
 		index += 1;
 	};
@@ -771,7 +767,7 @@ fn qbe_write_datum(qbe: *Qbe, datum: Qbe_Variable) void = {
 };
 
 fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
-	let node = token.tree.head;
+	let node = ll_value(ll_first(token.tree: *LinkedList): *LinkedListNode): nullable *IfCondNode;
 	for (node != null) {
 		const expr1 = (node as *IfCondNode).expr1;
 		const expr2 = (node as *IfCondNode).expr2;
@@ -782,7 +778,6 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		qbe_write_datum(qbe, expr1alloc);
 		qbe_write_datum(qbe, expr2alloc);
 		qbe_write(qbe, "# end")!;
-		fmt::println("halo",cmp)!;
 		switch (cmp) {
 		case "==" =>
 			let cmpreg1: Qbe_Identifier = @undefined;
@@ -833,6 +828,7 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		qbe_write(qbe, format("jnz %eql, @if{}t, @if{}f", curr_ifi, curr_ifi))!;
 		qbe_write_noindent(qbe, format("@if{}t", curr_ifi))!;
 		qbe_scope_push(qbe, "if", Qbe_ScopeKind::IF);
+		fmt::println(display_token_tree((*token.body).tokens))!;
 		qbe_write_block(qbe, *token.body);
 		qbe_scope_pop(qbe);
 		qbe_write_noindent(qbe, format("@if{}f", curr_ifi))!;

@@ -21,6 +21,13 @@ export fn ll_len(tree: *LinkedList) size = {
 	return i;
 };
 
+export fn ll_value(node: nullable *LinkedListNode) nullable *opaque = {
+	return match (node) {
+	case let node: *LinkedListNode => yield node.value: *opaque;
+	case null => yield null;
+	};
+};
+
 export fn ll_empty(tree: *LinkedList) bool = {
 	return tree.head == null;
 };

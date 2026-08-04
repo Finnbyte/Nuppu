@@ -261,29 +261,29 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 
 	expr1 = tokenizer_parse_expression(tokenizer);
 
+	fmt::println("expr1", expression_to_str(expr1))!;
+	fmt::println("next", peek_next(tokenizer).value)!;
+
 	skip_empty(tokenizer);
 
 	// Supports == and !=
-	fmt::println(peek_next(tokenizer).value)!;
-	fmt::println("HERE")!;
 	if (peek_next(tokenizer).kind == LexKind::EQUALS) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
+		fmt::println("this 1")!;
 		cmp = "==";
 	} else if (peek_next(tokenizer).kind == LexKind::EXCLAMATION) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
+		fmt::println("this 2")!;
 		cmp = "!=";
 	};
 
 	skip_empty(tokenizer);
 
-	expr2 = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: *Expression => yield expression;
-	case let expression: *VariableExpression => yield expression;
-	case let expression: *FunctionExpression => yield expression;
-	};
+	expr2 = tokenizer_parse_expression(tokenizer);
 
+	fmt::println("expr2", expression_to_str(expr2))!;
 	const node = alloc(IfCondNode {
 		expr1 = expr1,
 		expr2 = expr2,
@@ -306,17 +306,12 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 	next_expect(tokenizer, LexKind::WHITESPACE);
 	skip_empty(tokenizer);
 
-	let prevNode: *IfCondNode = @undefined;
-
 	let keyword = "";
 	for (keyword != "do") {
+		fmt::printfln("kw '{}'", keyword)!;
+
 		const node = tokenizer_parse_if_node(tokenizer);
-		if (tree.head == null)  {
-			tree.head = node;
-			prevNode = tree.head as *IfCondNode;
-		} else {
-			prevNode.next = node;
-		};
+		ll_push(tree: *LinkedList, node);
 
 		skip_empty(tokenizer);
 
@@ -333,9 +328,19 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 				for (let i = 0; i < 1; i+=1) next(tokenizer);
 				next_expect(tokenizer, LexKind::WHITESPACE);
 			case "do" => break;
-			case => next(tokenizer);
+			case => 
+				fmt::println("what is it", peek_next(tokenizer).value)!;
+				if (peek_next(tokenizer).kind == LexKind::WHITESPACE) {
+					skip_empty(tokenizer);
+					fmt::println(peek_next(tokenizer).value)!;
+				} else {
+					next(tokenizer);
+					fmt::println(peek_next(tokenizer).value)!;
+				};
 		};
 	};
+
+	fmt::println("hmm", expression_to_str(((tree.head: *LinkedListNode).value: *IfCondNode).expr1))!;
 
 	const block = initiate_block_token(BlockKind::IF);
 	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
@@ -347,7 +352,6 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 		tree = tree,
 		body = block
 	})!)!;
-
 
 	// Go ahead to avoid retokenizing from nested if tokenizer
 	for (let i = 0z; i < 4; i+= 1) {
@@ -724,6 +728,9 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (*Expression | *VariableExp
 			ll_push(function_expression.arguments: *LinkedList, create_expr_node(value));
 		};
 
+		// Go next from PAREN_CLOSE
+		next(tokenizer);
+
 		return function_expression;
 	};
 
@@ -843,12 +850,13 @@ fn display_token_tree(tokens: []Token, indent: int=0) void = {
 	for (const some_token .. tokens) {
 		match (some_token) {
 		case let token: *FunDefToken =>
-			fmt::print("FUN main ::= (")!;
+			fmt::printf("FUN {} ::= (", token.name)!;
 			for (const param .. token.proc.parameters) {
 				fmt::printf("{}: {}", param.name, expressionkind_to_str(param.kind))!;
 			};
 			fmt::print(") IS")!;
 			fmt::println()!;
+			fmt::println("hello", len(token.body.tokens))!;
 			display_token_tree(token.body.tokens[1..], 4);
 			fmt::println("END\n")!;
 		case let token: *FuncallToken =>
@@ -867,7 +875,19 @@ fn display_token_tree(tokens: []Token, indent: int=0) void = {
 		case let token: *VariableToken =>
 			fmt::printfln("{} ::= {}", token.name, expression_to_str(token.value))!;
 		case let token: *IfToken =>
-			fmt::println("IfToken")!;
+			fmt::print("IF ")!;
+			let node = ll_value(ll_first(token.tree: *LinkedList)): nullable *IfCondNode;
+			for (node != null) {
+				const actual_node = node: *IfCondNode;
+				fmt::print(expression_to_str(actual_node.expr1))!;
+				fmt::print(actual_node.cmp)!;
+				fmt::print(expression_to_str(actual_node.expr2))!;
+				fmt::print(" DO")!;
+				node = actual_node.next;
+			};
+			fmt::println()!;
+			display_token_tree(token.body.tokens[1..], 0);
+			fmt::println("END")!;
 		case let token: *ReturnToken =>
 			fmt::printfln("RETURN {}", expression_to_str(token.value))!;
 		case let token: *LabelToken =>
