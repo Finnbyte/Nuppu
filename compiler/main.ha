@@ -74,7 +74,10 @@ export fn read_file_contents(file_path: (str | *path::buffer), include_null_term
 	case let s: str => yield s;
 	case let p: *path::buffer => yield path::string(p);
 	};
-	const file = os::open(str_file_path)!;
+	const file = match(os::open(str_file_path)) {
+	case let file: io::file => yield file;
+	case let err: fs::error => spawn_error(fs::strerror(err));
+	};
 	const stat = os::fstat(file)!;
 	let buf_sz = stat.sz;
 	if (include_null_terminator) buf_sz += 1;
@@ -111,35 +114,6 @@ fn usage(exitCode: int = 0) never = {
 fn spawn_error(msg: str) never = {
 	fmt::println("error:", msg)!;
 	os::exit(1);
-};
-
-fn trimext(path: *path::buffer) str = {
-	const filepath_str = path::peek(path);
-	const (filename, extension) = strings::rcut(filepath_str as str, ".");
-	return filename;
-};
-
-fn decide_real_output_file_path(input_file_path: path::buffer, output_file_path_flag: (str | void)) path::buffer = {
-	let result_path = path::init()!;
-	match (output_file_path_flag) {
-	case let p: str =>
-		path::push(&result_path, p)!;
-	case void => 
-		const filename_with_ext = path::peek(&input_file_path) as str;
-		const (filepath_without_ext, _) = strings::rcut(filename_with_ext, ".");
-
-		path::push(&result_path, "./")!;
-		path::push(&result_path, filepath_without_ext)!;
-	};
-	return result_path;
-};
-
-fn ensure_ext(file_path: path::buffer, ext: str) void = {
-	const extension = path::peek_ext(&file_path);
-	if (extension is void || (extension is str && (extension as str) != ext)) {
-		fmt::println("Incorrect input file extension. Expecting '.nup'.\n")!;
-		usage(1);
-	};
 };
 
 export fn main() void = {
@@ -193,34 +167,25 @@ export fn main() void = {
 		fmt::println("Missing input file.\n")!;
 		usage(1);
 	};
-	input_file_path = path::init(input_file_path_str)!;
 
-	ensure_ext(input_file_path, "nup");
+	const paths = compute_required_filepaths(input_file_path_str, output_file_path_flag);
 
-	// Compute real output file path
-	const output_file_path = decide_real_output_file_path(input_file_path, output_file_path_flag);
-	const output_file_path_str = strings::dup(path::string(&output_file_path))!;
-
-	// Compute intermediary paths
-	const intermediary_output_file_path = strings::concat(output_file_path_str, ".ssa")!;
-	const intermediary_output_file = match (os::create(intermediary_output_file_path, fs::mode::USER_RW)) {
+	const intermediary_output_file = match (os::create(paths.intermediary_output_file_path, fs::mode::USER_RW)) {
 	case let file: io::file => yield file;
 	case let err: fs::error =>
 		spawn_error(fs::strerror(err));
 	};
 
-	const nup_file_contents = read_file_contents(&input_file_path);
-
-	const lexer = Lexer {
-		symbols = [],
-		buffer = strings::torunes(strings::trim(nup_file_contents))!,
-	};
+	// Read actual file contents of .nup source file
+	const nup_file_contents = read_file_contents(paths.input_file_path_str);
 
 	// Lex the buffer, saving the lexed symbols into the Lexer
-	lexer_lex_buffer(&lexer);
+	const lexer = init_lexer(nup_file_contents);
+	defer free(lexer);
+	lexer_lex_buffer(lexer);
 
 	// Initialize the tokenizer based on the lexer's accumulated output data buffer
-	globalTokenizer = init_tokenizer(lexer);
+	globalTokenizer = init_tokenizer(*lexer);
 
 	// Parse globally
 	tokenizer_parse_buffer(&globalTokenizer);
@@ -246,11 +211,11 @@ export fn main() void = {
 
 	qbe_commit(qbe, intermediary_output_file);
 	qbe_compile(
-		intermediary_output_file_path, 
-		output_file_path_str)!;
+		paths.intermediary_output_file_path, 
+		paths.output_file_path_str)!;
 
 	if (enable_execute_flag) {
-		fmt::println(run_executable_and_capture_stdout(output_file_path_str)!)!;
+		fmt::println(run_executable_and_capture_stdout(paths.output_file_path_str)!)!;
 	};
 
 };

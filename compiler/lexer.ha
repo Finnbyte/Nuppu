@@ -41,6 +41,14 @@ type Lexer = struct {
 	buffer: []rune
 };
 
+fn init_lexer(source_file_content: str) *Lexer = {
+	const lexer = alloc(Lexer {
+		symbols = [],
+		buffer = strings::torunes(strings::trim(source_file_content))!,
+	})!;
+	return lexer;
+};
+
 fn next_lexer(lexer: *Lexer) LexSymbol = {
 	const ch = lexer.buffer[0];
 	delete(lexer.buffer[0]);
