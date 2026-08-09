@@ -6,6 +6,7 @@
 //     right: ExprTree | ExprNode
 // }
 
+use path;
 use types;
 use rt;
 use fmt;
@@ -26,6 +27,8 @@ use os;
 const ALIGNMENT: size = 4;
 
 const globalTokenizer: Tokenizer = @undefined;
+
+const BASE_QBE_FILE_PATH = "/usr/local/share/nuppu/base.qbe";
 
 fn itoa(num: (size | int)) str = {
 	return format("{}", num);
@@ -66,8 +69,12 @@ fn shift_args(args_pointer: *[]str) (str | void) = {
 	return temp;
 };
 
-export fn read_file_contents(file_path: str, include_null_terminator: bool = true) str = {
-	const file = os::open(file_path)!;
+export fn read_file_contents(file_path: (str | *path::buffer), include_null_terminator: bool = true) str = {
+	const str_file_path = match (file_path) {
+	case let s: str => yield s;
+	case let p: *path::buffer => yield path::string(p);
+	};
+	const file = os::open(str_file_path)!;
 	const stat = os::fstat(file)!;
 	let buf_sz = stat.sz;
 	if (include_null_terminator) buf_sz += 1;
@@ -95,15 +102,48 @@ fn join(strs: []str, delim: str = "") str = {
 	return strings::join(delim, strs...)!;
 };
 
-export fn main() void = {
-	const args = os::args[0..len(os::args)];
-	const executable_name = shift_args(&args);
-	const input_file = shift_args(&args);
-	if (input_file is void) {
-		os::exit(1);
-	};
+fn usage(exitCode: int = 0) never = {
+	fmt::println("nuppuc - compiler for the Nuppu programming language")!;
+	fmt::println("usage: nuppuc <file path>")!;
+	os::exit(exitCode);
+};
 
-	// INFO: Example:
+fn spawn_error(msg: str) never = {
+	fmt::println("error:", msg)!;
+	os::exit(1);
+};
+
+fn trimext(path: *path::buffer) str = {
+	const filepath_str = path::peek(path);
+	const (filename, extension) = strings::rcut(filepath_str as str, ".");
+	return filename;
+};
+
+fn decide_real_output_file_path(input_file_path: path::buffer, output_file_path_flag: (str | void)) path::buffer = {
+	let result_path = path::init()!;
+	match (output_file_path_flag) {
+	case let p: str =>
+		path::push(&result_path, p)!;
+	case void => 
+		const filename_with_ext = path::peek(&input_file_path) as str;
+		const (filepath_without_ext, _) = strings::rcut(filename_with_ext, ".");
+
+		path::push(&result_path, "./")!;
+		path::push(&result_path, filepath_without_ext)!;
+	};
+	return result_path;
+};
+
+fn ensure_ext(file_path: path::buffer, ext: str) void = {
+	const extension = path::peek_ext(&file_path);
+	if (extension is void || (extension is str && (extension as str) != ext)) {
+		fmt::println("Incorrect input file extension. Expecting '.nup'.\n")!;
+		usage(1);
+	};
+};
+
+export fn main() void = {
+	// INFO: Example for iterating expression tree:
 	// const tree = create_expr_tree();
 	// const node = create_expr_node(alloc(Expression {
 	// 	value = [65, 66, 67],
@@ -117,26 +157,59 @@ export fn main() void = {
 	// case let x: *Expression => fmt::println(strings::fromutf8_unsafe(x.value))!;
 	// };
 
-	// flags
-	let enable_execute_flag = false;
-	for (len(args) > 0) {
+	const args = os::args[0..len(os::args)];
+	const executable_name = shift_args(&args);
+
+	let output_file_path_flag: (str | void) = void;
+	let input_file_path_str: str = @undefined;
+	let input_file_path: path::buffer = @undefined;
+	let enable_execute_flag: bool = false;
+	let enable_debug_flag: bool = false;
+
+	// Parse all other args except positional input file path
+	for (len(args) > 2) {
 		match (shift_args(&args)) {
 		case let arg: str =>
+			if (arg == "-h" || arg == "--help") usage();
 			if (arg == "-x") enable_execute_flag = true;
+			if (arg == "-d") enable_debug_flag = true;
+			if (arg == "-o" || arg == "--output") {
+				output_file_path_flag = match(shift_args(&args)) {
+				case let s: str => yield s;
+				case void =>
+					fmt::println("Missing output file path from -o flag.\n")!;
+					usage(1);
+
+				};
+			};
 		case void =>
 			yield void;
 		};
 	};
 
-	const (filename, extension) = strings::rcut(input_file as str, ".");
-	if (extension != "nup") {
-		fmt::println("Incorrect input file extension. Expecting '.nup'. Exiting")!;
+	input_file_path_str = match (shift_args(&args)) {
+	case let s: str => yield s;
+	case void => 
+		fmt::println("Missing input file.\n")!;
+		usage(1);
+	};
+	input_file_path = path::init(input_file_path_str)!;
+
+	ensure_ext(input_file_path, "nup");
+
+	// Compute real output file path
+	const output_file_path = decide_real_output_file_path(input_file_path, output_file_path_flag);
+	const output_file_path_str = strings::dup(path::string(&output_file_path))!;
+
+	// Compute intermediary paths
+	const intermediary_output_file_path = strings::concat(output_file_path_str, ".ssa")!;
+	const intermediary_output_file = match (os::create(intermediary_output_file_path, fs::mode::USER_RW)) {
+	case let file: io::file => yield file;
+	case let err: fs::error =>
+		spawn_error(fs::strerror(err));
 	};
 
-	const intermediary_output_file_path =  strings::concat("./", filename, ".ssa")!;
-	const intermediary_output_file = os::create(intermediary_output_file_path, fs::mode::USER_RW)!;
-
-	const nup_file_contents = read_file_contents(input_file as str);
+	const nup_file_contents = read_file_contents(&input_file_path);
 
 	const lexer = Lexer {
 		symbols = [],
@@ -145,7 +218,6 @@ export fn main() void = {
 
 	// Lex the buffer, saving the lexed symbols into the Lexer
 	lexer_lex_buffer(&lexer);
-	print_lexed_symbols(lexer); // debug
 
 	// Initialize the tokenizer based on the lexer's accumulated output data buffer
 	globalTokenizer = init_tokenizer(lexer);
@@ -153,12 +225,15 @@ export fn main() void = {
 	// Parse globally
 	tokenizer_parse_buffer(&globalTokenizer);
 
-	print_tokenizer_table(globalTokenizer);
+	if (enable_debug_flag) {
+		// Show tokenizer table for debugging
+		print_tokenizer_table(globalTokenizer);
+	};
 
-	// Initialize qbe struct and prefill the buffer with base utilities and
-	// functions
-	const qbe = qbe_initialize("./base.qbe");
+	// Initialize qbe struct and prefill the buffer with base utilities and functions
+	const qbe = qbe_initialize(BASE_QBE_FILE_PATH);
 
+	// Emit each token
 	for (const token .. globalTokenizer.tokens) {
 		if (token is *FunDefToken) {
 			qbe_write_function(&qbe, *(token as *FunDefToken));
@@ -170,11 +245,12 @@ export fn main() void = {
 	};
 
 	qbe_commit(qbe, intermediary_output_file);
-	qbe_compile(intermediary_output_file_path, filename)!;
+	qbe_compile(
+		intermediary_output_file_path, 
+		output_file_path_str)!;
 
 	if (enable_execute_flag) {
-		fmt::println("\nOutput:")!;
-		fmt::println(run_executable_and_capture_stdout(filename)!)!;
+		fmt::println(run_executable_and_capture_stdout(output_file_path_str)!)!;
 	};
 
 };

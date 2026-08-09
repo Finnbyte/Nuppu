@@ -240,14 +240,14 @@ fn qbe_write_noindent(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_Write
 // 	io::write(file, strings::toutf8(s))!;
 // };
 
-fn qbe_compile(intermediary_file_path: str, output_executable_basename: str, remove_assembly_file: bool = true) (void | nomem | os::exec::error) = {
-	const assembly_file_path = strings::concat(output_executable_basename, ".s")?;
+fn qbe_compile(intermediary_file_path: str, output_file_path: str, remove_assembly_file: bool = true) (void | nomem | os::exec::error) = {
+	const assembly_file_path = strings::concat(output_file_path, ".s")?;
 
 	const cmd = exec::cmd("qbe", "-o", assembly_file_path, intermediary_file_path)?;
 	const proc = exec::start(&cmd)?;
 	const status = exec::wait(&proc)?;
 
-	const cmd2 = exec::cmd("cc", "-o", output_executable_basename, assembly_file_path)?;
+	const cmd2 = exec::cmd("cc", "-o", output_file_path, assembly_file_path)?;
 	const proc2 = exec::start(&cmd2)?;
 	const status2 = exec::wait(&proc2)?;
 
