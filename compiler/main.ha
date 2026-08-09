@@ -141,7 +141,7 @@ export fn main() void = {
 	let enable_debug_flag: bool = false;
 
 	// Parse all other args except positional input file path
-	for (len(args) > 2) {
+	for (len(args) > 1) {
 		match (shift_args(&args)) {
 		case let arg: str =>
 			if (arg == "-h" || arg == "--help") usage();
@@ -168,6 +168,7 @@ export fn main() void = {
 		usage(1);
 	};
 
+	fmt::println("HALOO", input_file_path_str)!;
 	const paths = compute_required_filepaths(input_file_path_str, output_file_path_flag);
 
 	const intermediary_output_file = match (os::create(paths.intermediary_output_file_path, fs::mode::USER_RW)) {

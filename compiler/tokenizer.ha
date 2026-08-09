@@ -267,16 +267,33 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 	skip_empty(tokenizer);
 
 	// Supports == and !=
-	if (peek_next(tokenizer).kind == LexKind::EQUALS) {
+	const kind_of_next = peek_next(tokenizer).kind;
+	if (kind_of_next == LexKind::EQUALS) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
 		fmt::println("this 1")!;
 		cmp = "==";
-	} else if (peek_next(tokenizer).kind == LexKind::EXCLAMATION) {
+	} else if (kind_of_next == LexKind::EXCLAMATION) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
 		fmt::println("this 2")!;
 		cmp = "!=";
+	} else if (kind_of_next == LexKind::LESS) {
+		next(tokenizer);
+		switch (peek_next(tokenizer).kind) {
+		case LexKind::EQUALS =>
+			next(tokenizer);
+			cmp = "<=";
+		case => cmp = "<";
+		};
+	} else if (kind_of_next == LexKind::GREATER) {
+		next(tokenizer);
+		switch (peek_next(tokenizer).kind) {
+		case LexKind::EQUALS =>
+			next(tokenizer);
+			cmp = ">=";
+		case => cmp = ">";
+		};
 	};
 
 	skip_empty(tokenizer);

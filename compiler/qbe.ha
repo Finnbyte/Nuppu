@@ -82,7 +82,7 @@ fn get_variable_reg(qbe: *Qbe, variable_identifier: str) Qbe_Identifier = {
 	fmt::fatal("Could not find reg");
 };
 
-const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z"];
+const registers: []str = ["%a", "%b", "%c", "%d", "%e", "%f", "%g", "%h", "%i", "%j", "%k", "%l", "%m", "%n", "%o", "%p", "%q", "%r", "%s", "%t", "%u", "%v", "%w", "%x", "%y", "%z", "%aa", "%bb", "%cc", "%dd", "%ee", "%ff", "%gg", "%hh", "%ii", "%jj"];
 const datums: []str = ["$a", "$b", "$c", "$d", "$e", "$f", "$g", "$h", "$i", "$j", "$k", "$l", "$m", "$n", "$o", "$p", "$q", "$r", "$s", "$t", "$u", "$v", "$w", "$x", "$y", "$z"];
 
 type Qbe_Integer = struct {
@@ -334,7 +334,10 @@ fn qbe_define_funcall_args(qbe: *Qbe, arguments: *ExprTree) str = {
 					append(call_args, format("l {}", data.reg.reg))!;
 				};
 
-			case let arg: *FunctionExpression => unimplemented("FUNCTION EXPR NOT IMPLEMENTED");
+			case let arg: *FunctionExpression => 
+				const datum = qbe_define_datum(qbe, arg, arg.name);
+				qbe_write_datum(qbe, datum);
+				append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
 			case let arg: *VariableExpression => 
 				const result = qbe_scope_find_var_by_src_var(qbe, arg.name);
 				match (result) {
@@ -778,50 +781,60 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		qbe_write_datum(qbe, expr1alloc);
 		qbe_write_datum(qbe, expr2alloc);
 		qbe_write(qbe, "# end")!;
+
+		let cmpreg1: Qbe_Identifier = @undefined;
+		let cmpreg2: Qbe_Identifier = @undefined;
+
+		if (expr1alloc.kind != expr2alloc.kind) {
+			fmt::fatal("TYPE_ERROR: cannot compare different data types");
+		};
+
+		// Guaranteed to be same after ^
+		const data_kind = expr1alloc.kind;
+
+		cmpreg1 = expr1alloc.reg;
+		cmpreg2 = expr2alloc.reg;
+
 		switch (cmp) {
 		case "==" =>
-			let cmpreg1: Qbe_Identifier = @undefined;
-			let cmpreg2: Qbe_Identifier = @undefined;
-
-			if (expr1alloc.kind != expr2alloc.kind) {
-				fmt::fatal("TYPE_ERROR: cannot compare different data types");
-			};
-
-			// Guaranteed to be same after ^
-			const data_kind = expr1alloc.kind;
-
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR =>
-				cmpreg1 = expr1alloc.reg;
-				cmpreg2 = expr2alloc.reg;
 				qbe_write(qbe, format("%eql  =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
 			case Qbe_VariableDataKind::INT =>
-				cmpreg1 = expr1alloc.reg;
-				cmpreg2 = expr2alloc.reg;
 				qbe_write(qbe, format("%eql =l ceql {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
 			};
 		case "!=" =>
-			let cmpreg1: Qbe_Identifier = @undefined;
-			let cmpreg2: Qbe_Identifier = @undefined;
-
-			if (expr1alloc.kind != expr2alloc.kind) {
-				fmt::fatal("TYPE_ERROR: cannot compare different data types");
-			};
-
-			// Guaranteed to be same after ^
-			const data_kind = expr1alloc.kind;
-
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR =>
-				cmpreg1 = expr1alloc.reg;
-				cmpreg2 = expr2alloc.reg;
-				qbe_write(qbe, format("%eql  =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
 			case Qbe_VariableDataKind::INT =>
-				cmpreg1 = expr1alloc.reg;
-				cmpreg2 = expr2alloc.reg;
-				qbe_write(qbe, format("%eql =l ceql {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l cnel {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
 			};
-		case => unimplemented("GTE, LTE, GT, LT");
+		case "<" =>
+			switch (data_kind) {
+			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by LT", linenum());
+			case Qbe_VariableDataKind::INT =>
+				qbe_write(qbe, format("%eql =l cslel {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+			};
+		case "<=" =>
+			switch (data_kind) {
+			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by LTE", linenum());
+			case Qbe_VariableDataKind::INT =>
+				qbe_write(qbe, format("%eql =l csltl {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+			};
+		case ">" =>
+			switch (data_kind) {
+			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by GT", linenum());
+			case Qbe_VariableDataKind::INT =>
+				qbe_write(qbe, format("%eql =l csgel {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+			};
+		case ">=" =>
+			switch (data_kind) {
+			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by GTE", linenum());
+			case Qbe_VariableDataKind::INT =>
+				qbe_write(qbe, format("%eql =l csgtl {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+			};
+		case => panic(format("Unsupported operator: {}", cmp))!;
 		};
 		const curr_ifi = ifi;
 		ifi += 1;

@@ -23,6 +23,8 @@ type LexKind = enum {
 	COLON,
 	EXCLAMATION,
 	WHITESPACE,
+	LESS,
+	GREATER,
 	NEWLINE,
 	DIGIT,
 	NULLTERM,
@@ -72,13 +74,15 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 	case ':' => return LexKind::COLON;
 	case '\0' => return LexKind::NULLTERM;
 	case '=' => return LexKind::EQUALS;
+	case '>' => return LexKind::GREATER;
+	case '<' => return LexKind::LESS;
 	case '\"' => return LexKind::QUOTE;
 	case '\'' => return LexKind::SINGLE_QUOTE;
 	case => 
 		if (ascii::isdigit(ch)) {
 			return LexKind::DIGIT;
 		};
-		if (ascii::isprint(ch)) {
+		if (ascii::isprint(ch) || ch == 'ä' || ch == 'ö' || ch == 'å') {
 			return LexKind::CHAR;
 		};
 		if (ascii::isblank(ch)) {
