@@ -133,7 +133,7 @@ export fn main() void = {
 		fmt::println("Incorrect input file extension. Expecting '.nup'. Exiting")!;
 	};
 
-	const intermediary_output_file_path = strings::concat("./", filename, ".ssa")!;
+	const intermediary_output_file_path =  strings::concat("./", filename, ".ssa")!;
 	const intermediary_output_file = os::create(intermediary_output_file_path, fs::mode::USER_RW)!;
 
 	const nup_file_contents = read_file_contents(input_file as str);

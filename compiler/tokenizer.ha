@@ -508,6 +508,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 			const label_name = next_till_nonchar_or_nondigit(tokenizer);
 			append(tokenizer.tokens, alloc(GoToken { label = label_name })!)!;
 		} else if (keyword == "fun") {
+			skip_empty(tokenizer);
 			tokenizer_parse_fun(tokenizer);
 		} else if (keyword == "let") {
 			tokenizer_parse_variable_declaration(tokenizer);
