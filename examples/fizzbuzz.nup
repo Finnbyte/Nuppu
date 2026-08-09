@@ -1,0 +1,36 @@
+fun fizzbuzz(i: int) is
+	if mod(i, 15) == 0 do
+		printf("FizzBuzz\n")
+		go end
+	end
+
+	if mod(i, 5) == 0 do
+		printf("Buzz\n")
+		go end
+	end
+
+	if mod(i, 3) == 0 do
+		printf("Fizz\n")
+		go end
+	end
+
+	printf("%d\n", i)
+	go end
+
+	:end
+	return 0
+end
+
+fun rec(i: int) is
+	if i == 100 do return 0 end
+
+	fizzbuzz(i)
+	let new_i: int = add(i, 1)
+	rec(new_i)
+	return 0
+end
+
+fun main() is
+	rec(1)
+	return 0
+end

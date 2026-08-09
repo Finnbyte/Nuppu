@@ -1,0 +1,19 @@
+fun fib_to_100(a: int, b: int, i: int) is
+	if i == 12 do
+		return 0
+	end
+
+	printf("%d\n", a)
+
+	let new_a: int = b
+	let new_b: int = add(a, b)
+	let new_i: int = add(i, 1)
+
+	fib_to_100(new_a, new_b, new_i)
+	return 0
+end
+
+fun main() is
+	fib_to_100(0, 1, 1)
+	return 0
+end
