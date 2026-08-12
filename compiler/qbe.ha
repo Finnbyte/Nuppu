@@ -518,7 +518,7 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			};
 			qbe_scope_add_variable(qbe, new_var);
 			return new_var;
-		case void => fmt::fatal("COULD NOT FIND RESULT IN DEFINE DATUM");
+		case void => fmt::fatalf("line {}: could not find variable \"{}\" in scope", linenum(), expr.name);
 		};
 	case => fmt::fatal("Incorrect expr type encountered while writing datum",);
 	};
@@ -714,6 +714,17 @@ fn qbe_scope_update_var(qbe: *Qbe, new_var: Qbe_Variable) void = {
 
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	qbe_scope_push(qbe, token.name, Qbe_ScopeKind::FUN);
+
+	// Write nested functions beforehand
+	for (const token .. token.body.tokens[1..]) {
+		match (token) {
+		case let token: *FunDefToken =>
+			fmt::println(token.name)!;
+			qbe_write_function(qbe, *token);
+		case => pass();
+		};
+		fmt::println(1)!;
+	};
 
 	if (token.name == "main") {
 		qbe_write(qbe, "export function w $main() {")!;
