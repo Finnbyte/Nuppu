@@ -15,6 +15,10 @@ use regex;
 use strings;
 use os;
 
+type PPImportToken = struct { 
+	value: str
+};
+
 type ReturnToken = struct {
 	value: AnyExpression
 };
@@ -461,6 +465,28 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	for (let i = 0z; i < 4; i+= 1) {
 		next(tokenizer);
 	};
+};
+
+fn tokenizer_parse_hashtags(tokenizer: *Tokenizer) []*PPImportToken = {
+	const tokens: []*PPImportToken = [];
+
+	for (peek_next(tokenizer).kind == LexKind::HASHTAG) {
+		next(tokenizer);
+		const stmt_keyword = next_till_nonchar(tokenizer);
+		if (stmt_keyword != "import") {
+			fmt::fatalf("TOKENIZER_ERROR: unrecognized preprocessor statement: {}", stmt_keyword);
+		};
+			
+		next_expect(tokenizer, LexKind::WHITESPACE);
+
+		next_expect(tokenizer, LexKind::QUOTE);
+
+		const value = next_till_kind(tokenizer, LexKind::QUOTE);
+
+		append(tokens, alloc(PPImportToken { value = value })!)!;
+	};
+
+	return tokens;
 };
 
 fn tokenizer_parse_buffer(tokenizer: *Tokenizer) void = {

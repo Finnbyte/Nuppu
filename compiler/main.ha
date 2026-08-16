@@ -116,6 +116,12 @@ fn spawn_error(msg: str) never = {
 	os::exit(1);
 };
 
+// fn handle_preprocessing(lexer: *Lexer) void = {
+// 	for (peek_next_lexer(lexer) == LexKind::HASHTAG)) {
+// 		j
+// 	};
+// };
+
 export fn main() void = {
 	// INFO: Example for iterating expression tree:
 	// const tree = create_expr_tree();
@@ -187,6 +193,22 @@ export fn main() void = {
 
 	// Initialize the tokenizer based on the lexer's accumulated output data buffer
 	globalTokenizer = init_tokenizer(*lexer);
+
+	const pp_tokens = tokenizer_parse_hashtags(&globalTokenizer);
+	for (const pp_token .. pp_tokens) {
+		fmt::println(pp_token.value)!;
+		const p = path::init(pp_token.value)!;
+		const is_global_import = !path::abs(&p) && !strings::hasprefix(pp_token.value, ".");
+		const file = if (is_global_import) {
+			const 
+			yield 
+		} else {
+		};
+		fmt::println(path::abs(&p))!;
+		fmt::println(path::parent(&p)!)!;
+		unimplemented("lul");
+	};
+
 
 	// Parse globally
 	tokenizer_parse_buffer(&globalTokenizer);
