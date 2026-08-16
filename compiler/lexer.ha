@@ -28,6 +28,7 @@ type LexKind = enum {
 	NEWLINE,
 	DIGIT,
 	NULLTERM,
+	HASHTAG,
 	EQUALS,
 	SINGLE_QUOTE,
 	QUOTE
@@ -51,6 +52,11 @@ fn init_lexer(source_file_content: str) *Lexer = {
 	return lexer;
 };
 
+// fn peek_next_lexer(lexer: *Lexer) LexSymbol = {
+// 	const smy
+// 	return lexer.buffer[0];
+// };
+
 fn next_lexer(lexer: *Lexer) LexSymbol = {
 	const ch = lexer.buffer[0];
 	delete(lexer.buffer[0]);
@@ -70,6 +76,7 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 	case ',' => return LexKind::COMMA;
 	case ' ' => return LexKind::WHITESPACE;
 	case '!' => return LexKind::EXCLAMATION;
+	case '#' => return LexKind::HASHTAG;
 	case '\n' => return LexKind::NEWLINE;
 	case ':' => return LexKind::COLON;
 	case '\0' => return LexKind::NULLTERM;
@@ -79,6 +86,7 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 	case '\"' => return LexKind::QUOTE;
 	case '\'' => return LexKind::SINGLE_QUOTE;
 	case => 
+		fmt::println("In here", ch)!;
 		if (ascii::isdigit(ch)) {
 			return LexKind::DIGIT;
 		};
@@ -104,6 +112,7 @@ fn lexkind_to_rune(kind: LexKind) str = {
 	switch (kind) {
 	case LexKind::CHAR => return "CHAR";
 	case LexKind::COMMA => return "COMMA";
+	case LexKind::HASHTAG => return "HASHTAG";
 	case LexKind::PAREN_OPEN => return "PAREN_OPEN";
 	case LexKind::PAREN_CLOSE => return "PAREN_CLOSE";
 	case LexKind::WHITESPACE => return "WHITESPACE";

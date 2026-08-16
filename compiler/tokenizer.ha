@@ -15,6 +15,10 @@ use regex;
 use strings;
 use os;
 
+type PPImportToken = struct { 
+	value: str
+};
+
 type ReturnToken = struct {
 	value: AnyExpression
 };
@@ -761,7 +765,9 @@ fn linenum() int = {
 };
 
 fn tokenizer_is_valid_variable(identifier: str) bool = {
-	const is_valid_variable = ascii::isalpha(strings::torunes(identifier)![0]);
+	const identifier_runes = strings::torunes(identifier)!;
+	const is_valid_variable = identifier_runes[0] == '_' || ascii::isalpha(identifier_runes[0]);
+	fmt::println("is valid", is_valid_variable, identifier)!;
 	return is_valid_variable;
 };
 

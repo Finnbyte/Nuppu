@@ -1,0 +1,19 @@
+fun add(a: int, b: int) is
+	return __add(a, b)
+end
+
+fun sub(a: int, b: int): int is
+	return __sub(a, b)
+end
+
+fun mul(a: int, b: int): int is
+	return __mul(a, b)
+end
+
+fun div(a: int, b: int): int is
+	return __div(a, b)
+end
+
+fun mod(a: int, b: int): int is
+	return __mod(a, b)
+end
