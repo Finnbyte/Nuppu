@@ -53,6 +53,7 @@ type ParameterToken = struct {
 
 type FunDefToken = struct {
 	name: str,
+	return_type: (ExpressionKind | NoneType),
 	proc: *FunDefProcToken,
 	body: *BlockToken
 };
@@ -86,6 +87,8 @@ type BlockKind = enum {
 	IF,
 	FUN
 };
+
+type NoneType = void;
 
 type ExpressionKind = enum {
 	INT,
@@ -340,24 +343,24 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 		fmt::println("keyword", keyword)!;
 
 		switch (keyword) {
-			case "and" =>
-				node.next_type = &"and";
-				for (let i = 0; i < 2; i+=1) next(tokenizer);
-				next_expect(tokenizer, LexKind::WHITESPACE);
-			case "or" => 
-				node.next_type = &"or";
-				for (let i = 0; i < 1; i+=1) next(tokenizer);
-				next_expect(tokenizer, LexKind::WHITESPACE);
-			case "do" => break;
-			case => 
-				fmt::println("what is it", peek_next(tokenizer).value)!;
-				if (peek_next(tokenizer).kind == LexKind::WHITESPACE) {
-					skip_empty(tokenizer);
-					fmt::println(peek_next(tokenizer).value)!;
-				} else {
-					next(tokenizer);
-					fmt::println(peek_next(tokenizer).value)!;
-				};
+		case "and" =>
+			node.next_type = &"and";
+			for (let i = 0; i < 2; i+=1) next(tokenizer);
+			next_expect(tokenizer, LexKind::WHITESPACE);
+		case "or" => 
+			node.next_type = &"or";
+			for (let i = 0; i < 1; i+=1) next(tokenizer);
+			next_expect(tokenizer, LexKind::WHITESPACE);
+		case "do" => break;
+		case => 
+			fmt::println("what is it", peek_next(tokenizer).value)!;
+			if (peek_next(tokenizer).kind == LexKind::WHITESPACE) {
+				skip_empty(tokenizer);
+				fmt::println(peek_next(tokenizer).value)!;
+			} else {
+				next(tokenizer);
+				fmt::println(peek_next(tokenizer).value)!;
+			};
 		};
 	};
 
@@ -414,6 +417,14 @@ fn skip_empty(tokenizer: *Tokenizer) size = {
 	return skip_count;
 };
 
+fn tokenizer_parse_type(tokenizer: *Tokenizer) (ExpressionKind | NoneType) = {
+	const return_type: (ExpressionKind | NoneType) = switch (next_till_nonchar(tokenizer)) {
+	case "int" => yield ExpressionKind::INT;
+	case "str" => yield ExpressionKind::STR;
+	case "none" => yield NoneType;
+	case => fmt::fatalf("UNRECOGNIZED TYPE");
+	};
+};
 
 fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	const fun_name = next_till_nonchar_or_nondigit(tokenizer);
@@ -426,6 +437,19 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 
 	next_expect(tokenizer, LexKind::PAREN_CLOSE);
 
+	skip_empty(tokenizer);
+
+	if (peek_next(tokenizer).value != '-') {
+		fmt::fatalf("TOKENIZER_ERROR: function \"{}\" is lacking a return type!", fun_name);
+	};
+	next(tokenizer);
+	if (peek_next(tokenizer).value != '>') {
+		fmt::fatalf("TOKENIZER_ERROR: function \"{}\" is lacking a return type!", fun_name);
+	};
+	next(tokenizer);
+	skip_empty(tokenizer);
+
+	const return_type = tokenizer_parse_type(tokenizer);
 	next_expect(tokenizer, LexKind::WHITESPACE);
 
 	next_expect_rune(tokenizer, 'i');
@@ -437,27 +461,23 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	const block = initiate_block_token(BlockKind::FUN, fun_name);
 	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
 
-	append(blockwise_tokenizer.tokens, alloc(FunDefToken {
+	const fundef_token = alloc(FunDefToken {
 		name = fun_name,
+		return_type = return_type,
 		proc = alloc(FunDefProcToken {
 			name = fun_name,
 			parameters = parameters
 		})!,
 		body = block
-	})!)!;
+	})!;
+
+	append(blockwise_tokenizer.tokens, fundef_token)!;
 
 	tokenizer_parse_block(&blockwise_tokenizer);
 
 	block.tokens = blockwise_tokenizer.tokens;
 
-	append(tokenizer.tokens, alloc(FunDefToken {
-		name = fun_name,
-		proc = alloc(FunDefProcToken {
-			name = fun_name,
-			parameters = parameters
-		})!,
-		body = block
-	})!)!;
+	append(tokenizer.tokens, fundef_token)!;
 
 	tokenizer.buffer = blockwise_tokenizer.buffer;
 
@@ -477,16 +497,57 @@ fn tokenizer_parse_buffer(tokenizer: *Tokenizer) void = {
 			skip_empty(tokenizer);
 			tokenizer_parse_fun(tokenizer);
 		};
-		// } else if (keyword == "let") {
-		// 	tokenizer_parse_variable_declaration(tokenizer);
-		// } else if (keyword == "if") {
-		// 	tokenizer_parse_if(tokenizer);
-		// } else if (keyword != "") {
-		// 	if (tokenizer_is_valid_variable(keyword) && !(tokenizer_find_variable_value(tokenizer, keyword) is void)) {
-		// 		tokenizer_parse_variable_assign(tokenizer, keyword);
-		// 	};
-		// };
+	};
 };
+
+fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identifier: str) void = {
+	if (!tokenizer_is_valid_variable(identifier)) {
+		fmt::fatalf("TOKENIZER_ERROR: invalid identifier name given: \"{}\"", identifier);
+	};
+
+	if (peek_next(tokenizer).kind == LexKind::COLON) {
+		unimplemented("EXPLICIT TYPE HANDLING");
+	};
+
+	skip_empty(tokenizer);
+
+	switch (peek_next(tokenizer).kind) {
+	case LexKind::COLON => 
+		next(tokenizer);
+		next_expect(tokenizer, LexKind::EQUALS);
+		skip_empty(tokenizer);
+
+		const value = tokenizer_parse_expression(tokenizer);
+		const value_type = find_return_type(value);
+
+		append(tokenizer.tokens, alloc(VariableToken {
+			name = identifier,
+			value = value,
+			kind = value_type
+		})!)!;
+
+	case LexKind::EQUALS => 
+		next(tokenizer);
+		skip_empty(tokenizer);
+		const value = tokenizer_parse_expression(tokenizer);
+
+		let kind: VariableKind = @undefined;
+		for (const token .. tokenizer.tokens) {
+			if (token is *VariableToken) {
+				const var = token as *VariableToken;
+				if (var.name == identifier) {
+					kind = var.kind;
+				};
+			};
+		};
+
+		append(tokenizer.tokens, alloc(VariableToken {
+			name = identifier,
+			value = value,
+			kind = kind
+		})!)!;
+	case => fmt::fatalf("line {}: TOKENIZER_ERROR: invalid statement", linenum());
+	};
 };
 
 fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
@@ -531,8 +592,6 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		} else if (keyword == "fun") {
 			skip_empty(tokenizer);
 			tokenizer_parse_fun(tokenizer);
-		} else if (keyword == "let") {
-			tokenizer_parse_variable_declaration(tokenizer);
 		} else if (keyword == "if") {
 			tokenizer_parse_if(tokenizer);
 		} else if (keyword == "return") {
@@ -545,9 +604,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 				append(tokenizer.tokens, alloc(ReturnToken { value = value })!)!;
 			};
 		} else if (keyword != "") {
-			if (tokenizer_is_valid_variable(keyword)) {
-				tokenizer_parse_variable_assign(tokenizer, keyword);
-			};
+			tokenizer_parse_variable_declaration_or_assign(tokenizer, keyword);
 		};
 
 		// increment internal linenum counter if was new line
@@ -771,44 +828,11 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 	return is_valid_variable;
 };
 
-fn tokenizer_parse_variable_declaration(tokenizer: *Tokenizer) void = {
-	skip_empty(tokenizer);
-
-	const identifier = next_till_nonchar_or_nondigit(tokenizer);
-	if (!tokenizer_is_valid_variable(identifier)) {
-		fmt::fatalf("TOKENIZER_ERROR: invalid variable name '{}'", identifier);
+fn find_return_type(some_expr: AnyExpression) ExpressionKind = {
+	match (some_expr) {
+	case let expr: *Expression =>
+		return expr.kind;
 	};
-
-	// requires type
-	if (peek_next(tokenizer).kind != LexKind::COLON) {
-		fmt::fatalf("TOKENIZER_ERROR: missing type for '{}' on line: {}", identifier, linenum());
-	};
-
-	next(tokenizer);
-	skip_empty(tokenizer);
-	const var_type = switch (next_till_nonchar_or_nondigit(tokenizer)) {
-	case "int" => yield VariableKind::INT;
-	case "str" => yield VariableKind::STR;
-	case => fmt::fatal("invalid type");
-	};
-
-	skip_empty(tokenizer);
-
-	next_expect(tokenizer, LexKind::EQUALS);
-
-	skip_empty(tokenizer);
-
-	const value = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: *Expression => yield expression;
-	case let expression: *VariableExpression => yield expression;
-	case let expression: *FunctionExpression => yield expression;
-	};
-
-	append(tokenizer.tokens, alloc(VariableToken {
-		name = identifier,
-		value = value,
-		kind = var_type
-	})!)!;
 };
 
 // Returns whether there are still statements to be tokenized in the source file buffer.
@@ -837,37 +861,6 @@ fn tokenizer_should_stop(tokenizer: *Tokenizer) bool = {
 	};
 
 	return found_end;
-};
-
-fn tokenizer_parse_variable_assign(tokenizer: *Tokenizer, identifier: str) void = {
-	// skip space before '='
-	skip_empty(tokenizer);
-
-	fmt::println("höre")!;
-	next_expect(tokenizer, LexKind::EQUALS);
-
-	// skip space after '='
-	skip_empty(tokenizer);
-
-	const value = match (tokenizer_parse_expression(tokenizer)) {
-	case let expression: AnyExpression => yield expression;
-	};
-
-	let kind: VariableKind = @undefined;
-	for (const token .. tokenizer.tokens) {
-		if (token is *VariableToken) {
-			const var = token as *VariableToken;
-			if (var.name == identifier) {
-				kind = var.kind;
-			};
-		};
-	};
-
-	append(tokenizer.tokens, alloc(VariableToken {
-		name = identifier,
-		value = value,
-		kind = kind
-	})!)!;
 };
 
 fn display_token_tree(tokens: []Token, indent: int=0) void = {
@@ -959,5 +952,4 @@ fn next_till_keyword(tokenizer: *Tokenizer, keyword: str) (str | void) = {
 		};
 	};
 };
-
 
