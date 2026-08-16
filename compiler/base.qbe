@@ -3,37 +3,37 @@ data $echofmtd = { b "%d\n", b 0 }
 data $fmtd = { b "%d", b 0 }
 data $fmts = { b "%s", b 0 }
 
-function l $add(l %x, l %c) {
+function l __$add(l %x, l %c) {
 	@start
 	%o =l add %x, %c
 	ret %o
 }
 
-function l $sub(l %x, l %c) {
+function l __$sub(l %x, l %c) {
 	@start
 	%o =l sub %x, %c
 	ret %o
 }
 
-function l $mul(l %x, l %c) {
+function l __$mul(l %x, l %c) {
 	@start
 	%o =l mul %x, %c
 	ret %o
 }
 
-function l $div(l %x, l %c) {
+function l __$div(l %x, l %c) {
 	@start
 	%o =l div %x, %c
 	ret %o
 }
 
-function l $mod(l %x, l %c) {
+function l __$mod(l %x, l %c) {
 	@start
 	%o =l rem %x, %c
 	ret %o
 }
 
-function l $___itoa(l %X0) {
+function l $__itoa(l %X0) {
 	@start
 		%X0L =l loadl %X0
 		call $sprintf(l %X0, l $fmtd, l %X0L)
