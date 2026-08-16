@@ -33,21 +33,9 @@ function l $__mod(l %x, l %c) {
 	ret %o
 }
 
-function l $__itoa(l %X0) {
+function l $__itoa(l %x) {
 	@start
-		%X0L =l loadl %X0
-		call $sprintf(l %X0, l $fmtd, l %X0L)
+		%X0 =l alloc4 8
+		call $sprintf(l %X0, l $fmtd, l %x)
 		ret %X0
-}
-
-function $__echo_str(l %X0) {
-	@start
-		call $printf(l $echofmts, l %X0)
-		ret
-}
-
-function $__echo_int(l %x) {
-	@start
-		call $printf(l $echofmtd, l %x)
-		ret
 }
