@@ -93,7 +93,6 @@ export fn main() void = {
 		usage(1);
 	};
 
-	fmt::println(input_file_path_str)!;
 	let preprocessor_imports: []str = [];
 	let preprocessor_lines = 0;
 
@@ -112,6 +111,7 @@ export fn main() void = {
 		delete(nup_file_contents[0]);
 	};
 
+	// Nothing to do since no lines to preprocess, print current file contents
 	if (preprocessor_lines < 1) {
 		const result = strings::join("\n", nup_file_contents...)!;
 		fmt::println(result)!;
