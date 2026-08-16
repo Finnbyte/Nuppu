@@ -467,28 +467,6 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	};
 };
 
-fn tokenizer_parse_hashtags(tokenizer: *Tokenizer) []*PPImportToken = {
-	const tokens: []*PPImportToken = [];
-
-	for (peek_next(tokenizer).kind == LexKind::HASHTAG) {
-		next(tokenizer);
-		const stmt_keyword = next_till_nonchar(tokenizer);
-		if (stmt_keyword != "import") {
-			fmt::fatalf("TOKENIZER_ERROR: unrecognized preprocessor statement: {}", stmt_keyword);
-		};
-			
-		next_expect(tokenizer, LexKind::WHITESPACE);
-
-		next_expect(tokenizer, LexKind::QUOTE);
-
-		const value = next_till_kind(tokenizer, LexKind::QUOTE);
-
-		append(tokens, alloc(PPImportToken { value = value })!)!;
-	};
-
-	return tokens;
-};
-
 fn tokenizer_parse_buffer(tokenizer: *Tokenizer) void = {
 	for (tokenizer_has_next_statement(*tokenizer)) {
 		const keyword = next_till_nonchar(tokenizer);
@@ -787,7 +765,9 @@ fn linenum() int = {
 };
 
 fn tokenizer_is_valid_variable(identifier: str) bool = {
-	const is_valid_variable = ascii::isalpha(strings::torunes(identifier)![0]);
+	const identifier_runes = strings::torunes(identifier)!;
+	const is_valid_variable = identifier_runes[0] == '_' || ascii::isalpha(identifier_runes[0]);
+	fmt::println("is valid", is_valid_variable, identifier)!;
 	return is_valid_variable;
 };
 

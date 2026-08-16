@@ -6,4 +6,4 @@ clean:
 
 install:
 	mkdir -p /usr/local/bin
-	install -m5 nuppuc /usr/local/bin/nuppupp
+	install -m5 nuppupp /usr/local/bin/nuppupp

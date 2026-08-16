@@ -93,6 +93,7 @@ export fn main() void = {
 		usage(1);
 	};
 
+	fmt::println(input_file_path_str)!;
 	let preprocessor_imports: []str = [];
 	let preprocessor_lines = 0;
 
@@ -126,7 +127,6 @@ export fn main() void = {
 		} else {
 			const og = path::init(input_file_path_str)!;
 			path = path::init(path::dirname(input_file_path_str), import)!;
-			fmt::println("Halo", path::string(&path))!;
 		};
 
 		const imported_file_contents = read_file_contents_str(&path);
