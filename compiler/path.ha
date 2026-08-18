@@ -12,7 +12,12 @@ fn decide_real_output_file_path(input_file_path: path::buffer, output_file_path_
 	let result_path = path::init()!;
 	match (output_file_path_flag) {
 	case let p: str =>
+		const filename_with_ext = path::basename(p);
+		const (filepath_without_ext, _) = strings::rcut(filename_with_ext, ".");
+
 		path::push(&result_path, p)!;
+		path::pop(&result_path);
+		path::push(&result_path, filepath_without_ext)!;
 	case void => 
 		const filename_with_ext = path::peek(&input_file_path) as str;
 		const (filepath_without_ext, _) = strings::rcut(filename_with_ext, ".");
@@ -41,7 +46,10 @@ type FilePathData = struct {
 
 fn compute_required_filepaths(input_file_path_str: str, output_file_path_flag: (str | void)) FilePathData = {
 	const input_file_path = path::init(input_file_path_str)!;
-	ensure_ext(input_file_path, "nup"); // ext needs to be .nup
+	fmt::println(input_file_path_str)!;
+	if (input_file_path_str != "-") {
+		ensure_ext(input_file_path, "nup"); // ext needs to be .nup
+	};
 
 	// Compute real output file path
 	const output_file_path = decide_real_output_file_path(input_file_path, output_file_path_flag);

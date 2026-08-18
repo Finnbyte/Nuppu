@@ -1,0 +1,41 @@
+#!/bin/sh
+
+NUPPUPP_PATH="${NUPPUPP_PATH:-/usr/local/bin/nuppupp}"
+NUPPUC_PATH="${NUPPUC_PATH:-/usr/local/bin/nuppuc}"
+
+usage() {
+	echo "Usage: $0 <compile|run> <FILE PATH>"
+	# echo "Nuppu: Simple programming language."
+	exit "${1-1}"
+}
+
+if [ ! -f "$NUPPUPP_PATH" ]; then
+	echo "Missing \"nuppupp\" in PATH! Either install to /usr/local/bin or use \"NUPPUPP_PATH\" variable"
+	exit 1
+fi
+if [ ! -f "$NUPPUC_PATH" ]; then
+	echo "Missing \"nuppuc\" in PATH! Either install to /usr/local/bin or use \"NUPPUC_PATH\" variable"
+	exit 1
+fi
+
+compile() {
+	output_path="./$(basename "$1" ".nup")"
+	"$NUPPUPP_PATH" "$1" | "$NUPPUC_PATH" -o "$output_path" "-"
+	exit 0
+}
+
+compile_and_run() {
+	output_path="./$(basename "$1" ".nup")"
+	"$NUPPUPP_PATH" "$1" | "$NUPPUC_PATH" -o "$output_path" "-"
+	"$output_path"
+	exit 0
+}
+
+[ $# -lt 1 ] && echo "Missing mode.\n" && usage 1
+[ $# -lt 2 ] && echo "Missing input file.\n" && usage 1
+
+MODE=$1
+INPUT_FILE_PATH=$2
+
+[ "$MODE" = "compile" ] && compile "$INPUT_FILE_PATH"
+[ "$MODE" = "run" ] && compile_and_run "$INPUT_FILE_PATH"
