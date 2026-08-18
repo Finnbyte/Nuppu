@@ -6,6 +6,7 @@
 //     right: ExprTree | ExprNode
 // }
 
+use bufio;
 use path;
 use types;
 use rt;
@@ -116,6 +117,13 @@ fn spawn_error(msg: str) never = {
 	os::exit(1);
 };
 
+fn read_stdin() str = {
+	const stdin = os::stdin_file;
+	const bytes = io::drain(stdin)!;
+	fmt::println("Result:", strings::fromutf8(bytes)!)!;
+	return strings::fromutf8(bytes)!;
+};
+
 export fn main() void = {
 	// INFO: Example for iterating expression tree:
 	// const tree = create_expr_tree();
@@ -168,17 +176,18 @@ export fn main() void = {
 		usage(1);
 	};
 
-	fmt::println("HALOO", input_file_path_str)!;
 	const paths = compute_required_filepaths(input_file_path_str, output_file_path_flag);
 
-	const intermediary_output_file = match (os::create(paths.intermediary_output_file_path, fs::mode::USER_RW)) {
-	case let file: io::file => yield file;
-	case let err: fs::error =>
-		spawn_error(fs::strerror(err));
+	// Read actual file contents of .nup source file. Use stdin if file path given is "-" (similar to cat(1))
+	const nup_file_contents = if (paths.input_file_path_str != "-") {
+		yield read_file_contents(paths.input_file_path_str);
+	} else {
+		fmt::println("Reading stdin")!;
+		yield read_stdin();
 	};
+	defer free(nup_file_contents);
 
-	// Read actual file contents of .nup source file
-	const nup_file_contents = read_file_contents(paths.input_file_path_str);
+	fmt::println("contents:", nup_file_contents)!;
 
 	// Lex the buffer, saving the lexed symbols into the Lexer
 	const lexer = init_lexer(nup_file_contents);
@@ -208,6 +217,12 @@ export fn main() void = {
 		} else {
 			fmt::fatalf("Incompatible token in global scope at line {}: {}", linenum(), token_to_tokenkind(token));
 		};
+	};
+
+	const intermediary_output_file = match (os::create(paths.intermediary_output_file_path, fs::mode::USER_RW)) {
+	case let file: io::file => yield file;
+	case let err: fs::error =>
+		spawn_error(fs::strerror(err));
 	};
 
 	qbe_commit(qbe, intermediary_output_file);
