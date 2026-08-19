@@ -456,6 +456,7 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Va
 };
 
 fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
+	fmt::println("write variable", token.name)!;
 	const datum = qbe_define_datum(qbe, token.value, token.name);
 	qbe_write_datum(qbe, datum);
 };
@@ -488,7 +489,14 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const allocation = qbe_define_allocation(qbe, value_size, value, kind, src_identifier);
 		return allocation;
 	case let expr: *FunctionExpression => 
-		const reg = qbe_get_reg_label();
+		fmt::println("triyng to find", src_identifier)!;
+		const reg = match (src_identifier) {
+		case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
+			case let var: Qbe_Variable => yield var.reg;
+			case void => yield qbe_get_reg_label();
+		};
+		case void => yield qbe_get_reg_label();
+		};
 		const text = indent(format("{} =l call ${}({})", qbe_show_reg(reg), expr.name, qbe_define_funcall_args(qbe, expr.arguments)), qbe.indent_level);
 		const var = Qbe_Variable {
 			reg = reg,
@@ -506,10 +514,16 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const result = qbe_scope_find_var_by_src_var(qbe, expr.name);
 		match (result) {
 		case let var: Qbe_Variable => 
-			const identifier = qbe_get_reg_label();
-			const text = indent(format("{} =l copy {}", qbe_show_reg(identifier), qbe_show_reg(var.reg)), qbe.indent_level);
+			const reg = match (src_identifier) {
+			case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
+				case let var: Qbe_Variable => yield var.reg;
+				case void => yield qbe_get_reg_label();
+			};
+			case void => yield qbe_get_reg_label();
+			};
+			const text = indent(format("{} =l copy {}", qbe_show_reg(reg), qbe_show_reg(var.reg)), qbe.indent_level);
 			const new_var = Qbe_Variable {
-				reg = identifier,
+				reg = reg,
 				src_variable = src_identifier,
 				value = var.value,
 				kind = var.kind,
@@ -714,6 +728,25 @@ fn qbe_scope_update_var(qbe: *Qbe, new_var: Qbe_Variable) void = {
 
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	qbe_scope_push(qbe, token.name, Qbe_ScopeKind::FUN);
+
+	const parameters = token.proc.parameters;
+	for (const param .. parameters) {
+		fmt::println("Add param", param.name)!;
+		qbe_scope_add_variable(qbe, Qbe_Variable {
+		reg = Qbe_Identifier {
+		reg = format("%{}", param.name),
+		kind = Qbe_IdentifierKind::REG,
+		index = void
+	},
+		src_variable = param.name,
+		kind = ExpressionKind::INT,
+		value = void,
+		// must recursively expand args tho... since qbe doesn't
+		// support inline calls
+		text = "",
+		is_emitted = true
+	});
+	};
 
 	// Write nested functions beforehand
 	for (const token .. token.body.tokens[1..]) {
