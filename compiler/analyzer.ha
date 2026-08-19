@@ -83,8 +83,15 @@ fn ast_new() AST = {
 	return alloc([]: []ASTNode, 1024)!;
 };
 
-fn ast_push(tree: AST, node: ASTNode) void = {
+fn ast_push(tree: *AST, node: ASTNode) void = {
 	append(tree, node)!;
+};
+
+fn expressionkind_to_valuetype(kind: ExpressionKind) {
+	switch (kind) {
+	case ExpressionKind::INT => return ValueType::INT;
+	case ExpressionKind::STR => return ValueType::STR;
+	};
 };
 
 fn analyze(tokenizer: *Tokenizer) void = {
@@ -95,9 +102,14 @@ fn analyze(tokenizer: *Tokenizer) void = {
 		match (token) {
 		case let fun: *FunDefToken =>
 			const function = create_function(fun.name, [], [], ValueType::INT);
-			ast_push(ast, function);
+			ast_push(&ast, function);
 		};
 	};
 
-	fmt::println("ast len", len(ast))!;
+	for (const node .. ast) {
+		match (node) {
+		case let x: *Function => fmt::println("here we go", x.name.name)!;
+		case => pass();
+		};
+	};
 };
