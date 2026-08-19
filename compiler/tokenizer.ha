@@ -71,7 +71,6 @@ type IfToken = struct {
 type Token = (*VariableToken | *FuncallToken | *IfToken | *FunDefToken | *ReturnToken | *LabelToken | *GoToken);
 
 type VariableToken = struct {
-	kind: VariableKind,
 	name: str,
 	value: AnyExpression
 };
@@ -510,7 +509,6 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 	if (peek_next(tokenizer).kind == LexKind::COLON) {
 		next(tokenizer);
 		skip_empty(tokenizer);
-
 		explicit_value_type = tokenizer_parse_type(tokenizer);
 	};
 
@@ -523,15 +521,10 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 		skip_empty(tokenizer);
 
 		const value = tokenizer_parse_expression(tokenizer);
-		const value_type = match (explicit_value_type) {
-		case let expr: ExpressionKind => yield expr;
-		case void => yield find_return_type(tokenizer, value);
-		};
 
 		append(tokenizer.tokens, alloc(VariableToken {
 			name = identifier,
 			value = value,
-			kind = value_type
 		})!)!;
 
 	case LexKind::EQUALS => 
@@ -540,19 +533,17 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 		const value = tokenizer_parse_expression(tokenizer);
 
 		let kind: VariableKind = @undefined;
-		for (const token .. tokenizer.tokens) {
-			if (token is *VariableToken) {
-				const var = token as *VariableToken;
-				if (var.name == identifier) {
-					kind = var.kind;
-				};
-			};
-		};
+		// for (const token .. tokenizer.tokens) {
+		// 	if (token is *VariableToken) {
+		// 		const var = token as *VariableToken;
+		// 		if (var.name == identifier) {
+		// 		};
+		// 	};
+		// };
 
 		append(tokenizer.tokens, alloc(VariableToken {
 			name = identifier,
 			value = value,
-			kind = kind
 		})!)!;
 	case => fmt::fatalf("line {}: TOKENIZER_ERROR: invalid statement", linenum());
 	};
@@ -834,35 +825,6 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 	const is_valid_variable = identifier_runes[0] == '_' || ascii::isalpha(identifier_runes[0]);
 	fmt::println("is valid", is_valid_variable, identifier)!;
 	return is_valid_variable;
-};
-
-fn find_return_type(tokenizer: *Tokenizer, some_expr: AnyExpression) ExpressionKind = {
-	match (some_expr) {
-	case let expression: *Expression =>
-		return expression.kind;
-	case let variable_expression: *VariableExpression =>
-		const tokens = tokenizer.tokens;
-		let kind: (ExpressionKind | void) = void;
-		for (const token .. tokens) {
-			match (token) {
-			case let x: *VariableToken => 
-				fmt::println("löyty", x.name)!;
-				kind = x.kind;
-			case let x: *FunDefToken => 
-				const parameters = x.proc.parameters;
-				for (const param .. parameters) {
-					if (param.name == variable_expression.name) {
-						kind = param.kind;
-					};
-				};
-			case => pass();
-			};
-		};
-		match (kind) {
-		case let kind: ExpressionKind => return kind;
-		case void => fmt::fatalf("Could not find variable \"{}\"", variable_expression.name);
-		};
-	};
 };
 
 // Returns whether there are still statements to be tokenized in the source file buffer.

@@ -9,6 +9,13 @@ export type LinkedList = struct {
 	head: nullable *LinkedListNode
 };
 
+export fn ll_new() *LinkedList = {
+	const tree = alloc(LinkedList {
+		head = null
+	})!;
+	return tree;
+};
+
 export fn ll_len(tree: *LinkedList) size = {
 	if (tree.head == null) return 0;
 	let node: *LinkedListNode = tree.head as *LinkedListNode;
