@@ -1,28 +1,28 @@
-fun add(a: int, b: int) is
-	let result: int = __add(a, b)
+fun add(a: int, b: int) -> int is
+	result: int := __add(a, b)
 	return result
 end
 
-fun sub(a: int, b: int) is
-	let result: int = __sub(a, b)
+fun sub(a: int, b: int) -> int is
+	result: int := __sub(a, b)
 	return result
 end
 
-fun mul(a: int, b: int) is
-	let result: int = __mul(a, b)
+fun mul(a: int, b: int) -> int is
+	result: int := __mul(a, b)
 	return result
 end
 
-fun div(a: int, b: int) is
-	let result: int = __div(a, b)
+fun div(a: int, b: int) -> int is
+	result: int := __div(a, b)
 	return result
 end
 
-fun echo(s: str) is
+fun echo(s: str) -> none is
 	printf("%s\n", s)
 	return 0
 end
 
-fun itoa(num: int) is
+fun itoa(num: int) -> str is
 	return __itoa(num)
 end

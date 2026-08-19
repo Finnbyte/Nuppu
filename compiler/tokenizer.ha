@@ -418,10 +418,10 @@ fn skip_empty(tokenizer: *Tokenizer) size = {
 };
 
 fn tokenizer_parse_type(tokenizer: *Tokenizer) (ExpressionKind | NoneType) = {
-	const return_type: (ExpressionKind | NoneType) = switch (next_till_nonchar(tokenizer)) {
-	case "int" => yield ExpressionKind::INT;
-	case "str" => yield ExpressionKind::STR;
-	case "none" => yield NoneType;
+	switch (next_till_nonchar(tokenizer)) {
+	case "int" => return ExpressionKind::INT;
+	case "str" => return ExpressionKind::STR;
+	case "none" => return NoneType;
 	case => fmt::fatalf("UNRECOGNIZED TYPE");
 	};
 };
@@ -505,8 +505,13 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 		fmt::fatalf("TOKENIZER_ERROR: invalid identifier name given: \"{}\"", identifier);
 	};
 
+	let explicit_value_type: (ExpressionKind | NoneType | void) = void;
+	fmt::println(identifier)!;
 	if (peek_next(tokenizer).kind == LexKind::COLON) {
-		unimplemented("EXPLICIT TYPE HANDLING");
+		next(tokenizer);
+		skip_empty(tokenizer);
+
+		explicit_value_type = tokenizer_parse_type(tokenizer);
 	};
 
 	skip_empty(tokenizer);
@@ -518,7 +523,10 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 		skip_empty(tokenizer);
 
 		const value = tokenizer_parse_expression(tokenizer);
-		const value_type = find_return_type(value);
+		const value_type = match (explicit_value_type) {
+		case let expr: ExpressionKind => yield expr;
+		case void => yield find_return_type(tokenizer, value);
+		};
 
 		append(tokenizer.tokens, alloc(VariableToken {
 			name = identifier,
@@ -828,10 +836,32 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 	return is_valid_variable;
 };
 
-fn find_return_type(some_expr: AnyExpression) ExpressionKind = {
+fn find_return_type(tokenizer: *Tokenizer, some_expr: AnyExpression) ExpressionKind = {
 	match (some_expr) {
-	case let expr: *Expression =>
-		return expr.kind;
+	case let expression: *Expression =>
+		return expression.kind;
+	case let variable_expression: *VariableExpression =>
+		const tokens = tokenizer.tokens;
+		let kind: (ExpressionKind | void) = void;
+		for (const token .. tokens) {
+			match (token) {
+			case let x: *VariableToken => 
+				fmt::println("löyty", x.name)!;
+				kind = x.kind;
+			case let x: *FunDefToken => 
+				const parameters = x.proc.parameters;
+				for (const param .. parameters) {
+					if (param.name == variable_expression.name) {
+						kind = param.kind;
+					};
+				};
+			case => pass();
+			};
+		};
+		match (kind) {
+		case let kind: ExpressionKind => return kind;
+		case void => fmt::fatalf("Could not find variable \"{}\"", variable_expression.name);
+		};
 	};
 };
 
