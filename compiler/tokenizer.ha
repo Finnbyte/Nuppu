@@ -470,7 +470,7 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 		body = block
 	})!;
 
-	append(blockwise_tokenizer.tokens, fundef_token)!;
+	// append(blockwise_tokenizer.tokens, fundef_token)!;
 
 	tokenizer_parse_block(&blockwise_tokenizer);
 
