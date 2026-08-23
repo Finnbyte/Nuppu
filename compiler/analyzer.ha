@@ -30,9 +30,7 @@ fn analyzer_variable_exists(name: str) nullable *Variable = {
 };
 
 fn analyzer_function_exists(name: str) *Function = {
-	fmt::println(len(analyzer_state.functions))!;
 	for (const fun .. analyzer_state.functions) {
-		fmt::println(fun.name.name, name)!;
 		if (fun.name.name == name) return fun;
 	};
 	fmt::fatal("Could not find function");
@@ -136,8 +134,9 @@ fn ast_push(tree: *AST, node: ASTNode) void = {
 	append(tree, node)!;
 };
 
-fn expressionkind_to_valuetype(kind: ExpressionKind) ValueType = {
-	switch (kind) {
+fn expressionkind_to_valuetype(kind: (ExpressionKind | NoneType)) ValueType = {
+	if (kind is NoneType) return ValueType::NONE;
+	switch (kind as ExpressionKind) {
 	case ExpressionKind::INT => return ValueType::INT;
 	case ExpressionKind::STR => return ValueType::STR;
 	};
@@ -169,6 +168,14 @@ fn expression_to_valuelike(expression: AnyExpression) ValueLike = {
 	};
 };
 
+fn show_valuetype(value_type: ValueType) str = {
+	return switch(value_type) {
+	case ValueType::STR => yield "str";
+	case ValueType::INT => yield "int";
+	case ValueType::NONE => yield "none";
+	};
+};
+
 fn analyze(tokens: []Token) AST = {
 	const ast = ast_new();
 
@@ -177,11 +184,10 @@ fn analyze(tokens: []Token) AST = {
 	for (const token .. tokens) {
 		match (token) {
 		case let fun: *FunDefToken =>
-			const function = create_function(fun.name, [], [], ValueType::INT);
+			const function = create_function(fun.name, [], [], expressionkind_to_valuetype(fun.return_type));
 			append(analyzer_state.functions, function)!;
 			function.body = analyze(fun.body.tokens);
 			ast_push(&ast, function);
-			fmt::println(len(analyzer_state.functions))!;
 		case let var: *VariableToken =>
 			const value = expression_to_valuelike(var.value);
 			const variable = create_variable(var.name, value);
@@ -202,7 +208,7 @@ fn analyze(tokens: []Token) AST = {
 
 	for (const node .. ast) {
 		match (node) {
-		case let x: *Function => fmt::println("here we go", x.name.name)!;
+		case let x: *Function => fmt::println("here we go", x.name.name,  show_valuetype(x.return_type))!;
 		case => pass();
 		};
 	};

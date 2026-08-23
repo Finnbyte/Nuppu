@@ -200,40 +200,40 @@ export fn main() void = {
 	// Parse globally
 	tokenizer_parse_buffer(&globalTokenizer);
 
-	analyze(globalTokenizer.tokens);
+	// analyze(globalTokenizer.tokens);
 
-	// if (enable_debug_flag) {
-	// 	// Show tokenizer table for debugging
-	// 	print_tokenizer_table(globalTokenizer);
-	// };
+	if (enable_debug_flag) {
+		// Show tokenizer table for debugging
+		print_tokenizer_table(globalTokenizer);
+	};
 
-	// // Initialize qbe struct and prefill the buffer with base utilities and functions
-	// const qbe = qbe_initialize(BASE_QBE_FILE_PATH);
+	// Initialize qbe struct and prefill the buffer with base utilities and functions
+	const qbe = qbe_initialize(BASE_QBE_FILE_PATH);
 
-	// // Emit each token
-	// for (const token .. globalTokenizer.tokens) {
-	// 	if (token is *FunDefToken) {
-	// 		qbe_write_function(&qbe, *(token as *FunDefToken));
-	// 	} else if (token is *VariableToken) {
-	// 		qbe_write_variable(&qbe, *(token as *VariableToken));
-	// 	} else {
-	// 		fmt::fatalf("Incompatible token in global scope at line {}: {}", linenum(), token_to_tokenkind(token));
-	// 	};
-	// };
+	// Emit each token
+	for (const token .. globalTokenizer.tokens) {
+		if (token is *FunDefToken) {
+			qbe_write_function(&qbe, *(token as *FunDefToken));
+		} else if (token is *VariableToken) {
+			qbe_write_variable(&qbe, *(token as *VariableToken));
+		} else {
+			fmt::fatalf("Incompatible token in global scope at line {}: {}", linenum(), token_to_tokenkind(token));
+		};
+	};
 
-	// const intermediary_output_file = match (os::create(paths.intermediary_output_file_path, fs::mode::USER_RW)) {
-	// case let file: io::file => yield file;
-	// case let err: fs::error =>
-	// 	spawn_error(fs::strerror(err));
-	// };
+	const intermediary_output_file = match (os::create(paths.intermediary_output_file_path, fs::mode::USER_RW)) {
+	case let file: io::file => yield file;
+	case let err: fs::error =>
+		spawn_error(fs::strerror(err));
+	};
 
-	// qbe_commit(qbe, intermediary_output_file);
-	// qbe_compile(
-	// 	paths.intermediary_output_file_path, 
-	// 	paths.output_file_path_str)!;
+	qbe_commit(qbe, intermediary_output_file);
+	qbe_compile(
+		paths.intermediary_output_file_path, 
+		paths.output_file_path_str)!;
 
-	// if (enable_execute_flag) {
-	// 	fmt::println(run_executable_and_capture_stdout(paths.output_file_path_str)!)!;
-	// };
+	if (enable_execute_flag) {
+		fmt::println(run_executable_and_capture_stdout(paths.output_file_path_str)!)!;
+	};
 
 };
