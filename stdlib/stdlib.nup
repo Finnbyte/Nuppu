@@ -37,6 +37,62 @@ fun val(addr: int) -> int =
 end
 
 fun nth(array_begin_addr: int, index: int) -> int =
-	p := add(array_begin_addr, index)
+	aligned_index := mul(index, 8)
+	p := add(array_begin_addr, aligned_index)
 	return val(p)
+end
+
+fun fst(array_begin_addr: int, index: int) -> int =
+	p := add(array_begin_addr, 0)
+	return val(p)
+end
+
+fun __to_aligned(idx: int) -> int =
+	return mul(idx, 8)
+end
+
+// rembmer to always align indices
+fun range(start: int, end: int) -> int =
+	length := sub(end, start)
+	sz := mul(length, 8)
+	list := malloc(sz)
+	idx := 0
+
+	:loop
+	if idx >= length do 
+		go end 
+	end
+	p := add(list, __to_aligned(idx))
+	memset(p, idx, 1)
+	idx = add(idx, 1)
+	go loop
+
+	:end
+	return list
+end
+
+fun map(array_begin_addr: int, func_p: int) -> int =
+	return array_begin_addr
+end
+
+fun len(array_begin_addr: int) -> int =
+	idx := 0
+	:iter
+		idx = add(idx, 1)
+		value := nth(array_begin_addr, idx)
+		if idx >= 7 do
+			go end
+		end
+		go iter
+	:end
+	return idx
+end
+
+fun snd(array_begin_addr: int) -> int =
+	p := add(array_begin_addr, 8)
+	return val(p)
+end
+
+fun head(array_begin_addr: int) -> int =
+	return val(array_begin_addr, 0)
 end

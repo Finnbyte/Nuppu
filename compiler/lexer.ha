@@ -20,6 +20,8 @@ type LexKind = enum {
 	COMMA,
 	PAREN_OPEN,
 	PAREN_CLOSE,
+	BRACKET_OPEN,
+	BRACKET_CLOSE,
 	COLON,
 	EXCLAMATION,
 	WHITESPACE,
@@ -73,6 +75,8 @@ fn rune_to_lexkind(ch: rune) LexKind = {
 	switch (ch) {
 	case '(' => return LexKind::PAREN_OPEN;
 	case ')' => return LexKind::PAREN_CLOSE;
+	case '[' => return LexKind::BRACKET_OPEN;
+	case ']' => return LexKind::BRACKET_CLOSE;
 	case ',' => return LexKind::COMMA;
 	case ' ' => return LexKind::WHITESPACE;
 	case '!' => return LexKind::EXCLAMATION;
@@ -115,6 +119,8 @@ fn lexkind_to_rune(kind: LexKind) str = {
 	case LexKind::HASHTAG => return "HASHTAG";
 	case LexKind::PAREN_OPEN => return "PAREN_OPEN";
 	case LexKind::PAREN_CLOSE => return "PAREN_CLOSE";
+	case LexKind::BRACKET_OPEN => return "BRACKET_OPEN";
+	case LexKind::BRACKET_CLOSE => return "BRACKET_CLOSE";
 	case LexKind::WHITESPACE => return "WHITESPACE";
 	case LexKind::NEWLINE => return "NEWLINE";
 	case LexKind::DIGIT => return "DIGIT";
