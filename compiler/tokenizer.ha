@@ -97,9 +97,11 @@ type ExpressionKind = enum {
 	STR
 };
 
+const COMMENT = "//";
+
 fn valid_integer(s: str) bool = {
 	for (const ch .. strings::torunes(s)!) {
-		if (!ascii::isdigit(ch)) return false;
+		if (!ascii::isdigit(ch) && ch != '+' && ch != '-' && ch != '*' && ch != ' ' && ch != '/') return false;
 	};
 	return true;
 };
@@ -225,6 +227,16 @@ type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression);
 
 fn peek_next(tokenizer: *Tokenizer) LexSymbol = {
 	return tokenizer.buffer[0];
+};
+
+fn peek_line(tokenizer: *Tokenizer) str = {
+	const output: []rune = [];
+	for (const symbol .. tokenizer.buffer) {
+		if (symbol.kind == LexKind::NEWLINE) break;
+		append(output, symbol.value)!;
+	};
+	fmt::println("peek line output:", strings::fromrunes(output)!)!;
+	return strings::fromrunes(output)!;
 };
 
 fn next(tokenizer: *Tokenizer) LexSymbol = {
@@ -459,8 +471,7 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	const return_type = tokenizer_parse_type(tokenizer);
 	next_expect(tokenizer, LexKind::WHITESPACE);
 
-	next_expect_rune(tokenizer, 'i');
-	next_expect_rune(tokenizer, 's');
+	next_expect(tokenizer, LexKind::EQUALS);
 
 	next_expect(tokenizer, LexKind::NEWLINE);
 	incr_linenum(tokenizer);
@@ -498,6 +509,13 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 fn tokenizer_parse_buffer(tokenizer: *Tokenizer) void = {
 	for (tokenizer_has_next_statement(*tokenizer)) {
 		const keyword = next_till_nonchar(tokenizer);
+
+		// Skip comments
+		if (strings::hasprefix(keyword, COMMENT)) {
+			next_till_kind(tokenizer, LexKind::NEWLINE);
+			next(tokenizer);
+			continue;
+		};
 		if (len(keyword) == 0) next(tokenizer);
 
 		// only allow function definitions for now
@@ -581,6 +599,14 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		};
 
 		const keyword = next_till_nonchar_or_nondigit(tokenizer);
+
+		// Skip comments
+		if (strings::hasprefix(keyword, COMMENT)) {
+			next_till_kind(tokenizer, LexKind::NEWLINE);
+			next(tokenizer);
+			continue;
+		};
+
 		if (len(keyword) == 0) next(tokenizer);
 
 		// end closes block
@@ -592,7 +618,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 			fmt::fatalf("TOKENIZER_ERROR: {}: illegal \"end\" in non-scoped code", globalTokenizer.linenum);
 		};
 
-		fmt::println(keyword)!;
+		fmt::printfln("keyword is: '{}'", keyword)!;
 
 		// Check keyword
 		if (peek_next(tokenizer).kind == LexKind::PAREN_OPEN) {
@@ -756,7 +782,8 @@ fn tokenizer_parse_funcall_args(tokenizer: *Tokenizer) *ExprTree = {
 	const tree = create_expr_tree();
 
 	for (peek_next(tokenizer).kind != LexKind::PAREN_CLOSE) {
-		const value = tokenizer_parse_expression(tokenizer);
+		const value = tokenizer_parse_expression(tokenizer, ParseExpressionContext::ARG);
+		fmt::println("OKEI", expression_to_str(value))!;
 		ll_push(tree: *LinkedList, create_expr_node(value));
 
 		if (peek_next(tokenizer).kind == LexKind::COMMA) {
@@ -782,23 +809,31 @@ fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 	})!)!;
 };
 
-fn tokenizer_parse_expression(tokenizer: *Tokenizer) (*Expression | *VariableExpression | *FunctionExpression) = {
+type ParseExpressionContext = enum {
+	ARG,
+	NONARG
+};
+
+fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionContext = ParseExpressionContext::NONARG) (*Expression | *VariableExpression | *FunctionExpression) = {
 	// is it string literal?
 	if (peek_next(tokenizer).kind == LexKind::QUOTE) {
 		next(tokenizer);
-		const value = next_till_kind(tokenizer, LexKind::QUOTE);
+		const raw_value = next_till_kind(tokenizer, LexKind::QUOTE);
 		next(tokenizer);
 		return alloc(Expression {
 			kind = ExpressionKind::STR,
-			value = strings::toutf8(value),
-			value_size = len(value),
+			value = strings::toutf8(raw_value),
+			value_size = len(raw_value),
 		})!;
 	};
+
 
 	const raw_value = next_till_nonchar_or_nondigit(tokenizer);
 
 	// is it a number literal?
 	if (valid_integer(raw_value)) {
+		// For parsing actual math lines:
+		// const raw_value = next_till_kind(tokenizer, LexKind::NEWLINE);
 		return alloc(Expression {
 			kind = ExpressionKind::INT,
 			value = strings::toutf8(raw_value),
@@ -838,6 +873,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (*Expression | *VariableExp
 		return function_expression;
 	};
 
+	fmt::println("hm?",raw_value)!;
 	return fmt::fatal("Invalid expression");
 
 };

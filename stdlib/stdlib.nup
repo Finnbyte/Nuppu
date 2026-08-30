@@ -1,28 +1,42 @@
-fun add(a: int, b: int) -> int is
+fun add(a: int, b: int) -> int =
 	result: int := __add(a, b)
 	return result
 end
 
-fun sub(a: int, b: int) -> int is
+fun sub(a: int, b: int) -> int =
 	result: int := __sub(a, b)
 	return result
 end
 
-fun mul(a: int, b: int) -> int is
+fun mul(a: int, b: int) -> int =
 	result: int := __mul(a, b)
 	return result
 end
 
-fun div(a: int, b: int) -> int is
+fun div(a: int, b: int) -> int =
 	result: int := __div(a, b)
 	return result
 end
 
-fun echo(s: str) -> none is
+fun mod(a: int, b: int) -> int =
+	result: int := __mod(a, b)
+	return result
+end
+
+fun echo(s: str) -> none =
 	printf("%s\n", s)
 	return 0
 end
 
-fun itoa(num: int) -> str is
+fun itoa(num: int) -> str =
 	return __itoa(num)
+end
+
+fun val(addr: int) -> int =
+	return __val(addr)
+end
+
+fun nth(array_begin_addr: int, index: int) -> int =
+	p := add(array_begin_addr, index)
+	return val(p)
 end
