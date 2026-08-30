@@ -161,9 +161,14 @@ fn qbe_show_reg(reg: Qbe_Identifier) str = {
 	return format("{}{}", reg.reg, if (reg.index is int) reg.index else "");
 };
 
-fn qbe_get_reg_label(is_array: bool = false) Qbe_Identifier = {
-	let reg = registers[0];
-	static delete(registers[0]);
+fn qbe_get_reg_label(is_array: bool = false, identifier: (str | void) = void) Qbe_Identifier = {
+	let reg: str = @undefined;
+	if (!(identifier is void)) {
+		reg = format("%{}", identifier as str);
+	} else {
+		reg = registers[0];
+		static delete(registers[0]);
+	};
 	switch (is_array) {
 	case true => reg = format("{}0", ascii::strupper(reg)!);
 	case false => reg = reg;
@@ -415,7 +420,7 @@ fn indent_buf(buf: []str, indent_level: size) void = {
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_VariableDataKind, data_identifier: (str | void) = void) Qbe_Variable = {
 	const scope = qbe.scope;
 	let out: []str = [];
-	const reg = qbe_get_reg_label(true);
+	const reg = qbe_get_reg_label(true, data_identifier);
 	append(out, format("{} =l call $malloc(w {})", qbe_show_reg(reg), figure_malloc_size(data_sz, data_kind)))!;
 	if (data_sz > 1 && data_kind == Qbe_VariableDataKind::STR && !(data_identifier is void)) {
 		append(out, format("storel {}, {}", data[0], qbe_show_reg(reg)))!;
@@ -493,9 +498,9 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const reg = match (src_identifier) {
 		case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
 			case let var: Qbe_Variable => yield var.reg;
-			case void => yield qbe_get_reg_label();
+			case void => yield qbe_get_reg_label(false, src_identifier);
 		};
-		case void => yield qbe_get_reg_label();
+		case void => yield qbe_get_reg_label(false, src_identifier);
 		};
 		const text = indent(format("{} =l call ${}({})", qbe_show_reg(reg), expr.name, qbe_define_funcall_args(qbe, expr.arguments)), qbe.indent_level);
 		const var = Qbe_Variable {
@@ -517,9 +522,9 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			const reg = match (src_identifier) {
 			case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
 				case let var: Qbe_Variable => yield var.reg;
-				case void => yield qbe_get_reg_label();
+				case void => yield qbe_get_reg_label(false, identifier);
 			};
-			case void => yield qbe_get_reg_label();
+			case void => yield qbe_get_reg_label(false, expr.name);
 			};
 			const text = indent(format("{} =l copy {}", qbe_show_reg(reg), qbe_show_reg(var.reg)), qbe.indent_level);
 			const new_var = Qbe_Variable {
@@ -539,7 +544,7 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 };
 
 fn qbe_define_literal_integer(qbe: *Qbe, data: []u8, src_identifier: (str | void) = void) Qbe_Variable = {
-	const reg = qbe_get_reg_label();
+	const reg = qbe_get_reg_label(false, src_identifier);
 	const text = format("{} =l copy {}\n", qbe_show_reg(reg), strings::fromutf8_unsafe(data));
 
 	const var = Qbe_Variable {
@@ -558,34 +563,6 @@ fn qbe_define_literal_integer(qbe: *Qbe, data: []u8, src_identifier: (str | void
 	qbe_scope_add_variable(qbe, var);
 
 	return var;
-};
-
-fn qbe_define_blit(qbe: *Qbe, src_reg: Qbe_Identifier, bytes_amount: size) Qbe_Blit = {
-	const dest_reg = qbe_get_reg_label(true);
-	const dest_reg_str = qbe_show_reg(dest_reg);
-	const src_reg_str = qbe_show_reg(src_reg);
-	const out: []str = [];
-
-	append(out, format("{} =l alloc8 {}", dest_reg_str, bytes_amount))!;
-
-	const var = qbe_scope_find_var_by_reg(qbe, src_reg);
-	if (var is void) {
-		fmt::fatal("COULD NOT FIND VARIABLE");
-	};
-
-	if ((var as Qbe_Variable).kind == ExpressionKind::INT) {
-		append(out, format("storel {}, {}", src_reg_str, dest_reg_str))!;
-	} else {
-		append(out, format("blit {}, {}, {}", src_reg_str, dest_reg_str, bytes_amount))!;
-	};
-
-	indent_buf(out, qbe.indent_level);
-
-	return Qbe_Blit {
-		reg = dest_reg,
-		text = join(out, "\n")
-
-	};
 };
 
 fn qbe_regs_are_equal(reg1: Qbe_Identifier, reg2: Qbe_Identifier) bool = {
