@@ -26,6 +26,10 @@ type FuncallToken = struct {
 	arguments: *ExprTree,
 };
 
+type ArrayExpression = struct {
+	values: *ExprTree,
+};
+
 type BlockToken = struct {
 	kind: BlockKind,
 	id: str,
@@ -223,7 +227,7 @@ type VariableExpression = struct {
 	var: (str | void)
 };
 
-type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression);
+type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression | *ArrayExpression);
 
 fn peek_next(tokenizer: *Tokenizer) LexSymbol = {
 	return tokenizer.buffer[0];
@@ -814,7 +818,7 @@ type ParseExpressionContext = enum {
 	NONARG
 };
 
-fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionContext = ParseExpressionContext::NONARG) (*Expression | *VariableExpression | *FunctionExpression) = {
+fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionContext = ParseExpressionContext::NONARG) AnyExpression = {
 	// is it string literal?
 	if (peek_next(tokenizer).kind == LexKind::QUOTE) {
 		next(tokenizer);
@@ -827,6 +831,25 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionCon
 		})!;
 	};
 
+	// is it array?
+	if (peek_next(tokenizer).kind == LexKind::BRACKET_OPEN) {
+		next(tokenizer);
+		const expr_tree = create_expr_tree();
+		const array = alloc(ArrayExpression {
+			values = expr_tree
+		})!;
+		for (peek_next(tokenizer).kind != LexKind::BRACKET_CLOSE) {
+			if (peek_next(tokenizer).kind == LexKind::COMMA) next(tokenizer);
+			skip_empty(tokenizer);
+			const value = tokenizer_parse_expression(tokenizer);
+			ll_push(array.values: *LinkedList, create_expr_node(value));
+		};
+
+		// Go next from PAREN_CLOSE
+		next(tokenizer);
+
+		return array;
+	};
 
 	const raw_value = next_till_nonchar_or_nondigit(tokenizer);
 

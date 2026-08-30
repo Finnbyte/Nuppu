@@ -28,11 +28,7 @@ let ifi = 0;
 
 fn clone_qbe_variable(variable: Qbe_Variable) Qbe_Variable = {
 	const var = Qbe_Variable {
-		reg = Qbe_Identifier {
-			reg= strings::dup(variable.reg.reg)!,
-			kind= variable.reg.kind,
-			index= variable.reg.index
-		},
+		reg = clone_qbe_reg(variable.reg),
 		src_variable= if (variable.src_variable is str) strings::dup(variable.src_variable as str)! else void,
 		value = clone_expression(variable.value),
 		kind= variable.kind,
@@ -40,6 +36,15 @@ fn clone_qbe_variable(variable: Qbe_Variable) Qbe_Variable = {
 		is_emitted= variable.is_emitted
 	};
 	return var;
+};
+
+fn clone_qbe_reg(reg: Qbe_Identifier) Qbe_Identifier = {
+	const reg = Qbe_Identifier {
+		reg = strings::dup(reg.reg)!,
+		kind = reg.kind,
+		index = reg.index
+	};
+	return reg;
 };
 
 type Qbe_Identifier = struct {
@@ -169,14 +174,10 @@ fn qbe_get_reg_label(is_array: bool = false, identifier: (str | void) = void) Qb
 		reg = registers[0];
 		static delete(registers[0]);
 	};
-	switch (is_array) {
-	case true => reg = format("{}0", ascii::strupper(reg)!);
-	case false => reg = reg;
-	};
 	return Qbe_Identifier {
 		reg = reg,
 		kind = Qbe_IdentifierKind::REG,
-		index = 0
+		index = if (is_array) 0 else void
 	};
 
 };
@@ -539,6 +540,75 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			return new_var;
 		case void => fmt::fatalf("line {}: could not find variable \"{}\" in scope", linenum(), expr.name);
 		};
+	case let expr: *ArrayExpression =>
+		const reg = qbe_get_reg_label(true, src_identifier);
+
+		const output: []str = [];
+		
+		const elem_count = ll_len(expr.values: *LinkedList);
+		append(output, format("{} =l alloc8 {}", qbe_show_reg(reg), elem_count * 8))!;
+
+		let node = ll_head(expr.values: *LinkedList);
+		if (node != null) {
+			const value = (node.value: *ExprTreeNode).value;
+			// add first value
+			append(output, format("storel {}, {}", expression_to_str(value), qbe_show_reg(reg)))!;
+			node = node.next: *LinkedListNode;
+
+			// fmt::println("Len of tree for arr expr:", ll_len(expr.values: *LinkedList))!;
+			for (node != null) {
+				const value = (node.value: *ExprTreeNode).value;
+				const new_index = (reg.index as int) + 1;
+				const og_reg_text = qbe_show_reg(reg);
+				reg.index = new_index;
+				const new_reg_text = qbe_show_reg(reg);
+				append(output, format("{} =l add {}, 8", new_reg_text, og_reg_text))!;
+				append(output, format("storel {}, {}", expression_to_str(value), qbe_show_reg(reg)))!;
+
+				node = node.next: *LinkedListNode;
+			};
+
+			// add null pointer
+			const next_reg = clone_qbe_reg(reg);
+			next_reg.index = (next_reg.index as int) + 1;
+			append(output, format("{} =l add {}, 8",  qbe_show_reg(next_reg), qbe_show_reg(reg)))!;
+			append(output, format("storeb {}, {}", "0", qbe_show_reg(next_reg)))!;
+
+			// reset index to array beginning
+			reg.index = 0;
+
+		};
+		const text = join(output, "\n");
+
+		const var = Qbe_Variable {
+			reg = reg,
+			src_variable = src_identifier,
+			kind = ExpressionKind::INT,
+			value = void,
+			// must recursively expand args tho... since qbe doesn't
+			// support inline calls
+			text = text,
+			is_emitted = false
+		};
+
+		qbe_scope_add_variable(qbe, var);
+		return var;
+		// for (node != null) {
+		// 	const expr1 = (node as *IfCondNode).expr1;
+		// 	const expr2 = (node as *IfCondNode).expr2;
+		// 	const cmp = (node as *IfCondNode).cmp;
+		// 	const expr1alloc = qbe_define_datum(qbe, expr1);
+		// 	const expr2alloc = qbe_define_datum(qbe, expr2);
+		// 	qbe_write(qbe, "# if's datums")!;
+		// 	qbe_write_datum(qbe, expr1alloc);
+		// 	qbe_write_datum(qbe, expr2alloc);
+		// 	qbe_write(qbe, "# end")!;
+
+		// 	let cmpreg1: Qbe_Identifier = @undefined;
+		// 	let cmpreg2: Qbe_Identifier = @undefined;
+
+		// 	if (expr1alloc.kind != expr2alloc.kind) {
+		// 		fmt::fatal("TYPE_ERROR: cannot compare different data types");
 	case => fmt::fatal("Incorrect expr type encountered while writing datum",);
 	};
 };
