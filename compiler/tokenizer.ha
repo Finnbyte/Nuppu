@@ -74,7 +74,13 @@ type IfToken = struct {
 	body: *BlockToken
 };
 
-type Token = (*VariableToken | *FuncallToken | *IfToken | *FunDefToken | *ReturnToken | *LabelToken | *GoToken);
+type WhileToken = struct {
+	linenum: int,
+	tree: *CondTree,
+	body: *BlockToken
+};
+
+type Token = (*VariableToken | *FuncallToken | *WhileToken | *IfToken | *FunDefToken | *ReturnToken | *LabelToken | *GoToken);
 
 type VariableToken = struct {
 	name: str,
@@ -83,6 +89,7 @@ type VariableToken = struct {
 };
 
 type Tokenizer = struct {
+	parent: nullable *Tokenizer,
 	block: (*BlockToken | void),
 	tokens: []Token,
 	buffer: []LexSymbol,
@@ -91,6 +98,7 @@ type Tokenizer = struct {
 
 type BlockKind = enum {
 	IF,
+	WHILE,
 	FUN
 };
 
@@ -143,6 +151,7 @@ fn expression_to_str(anyexpr: AnyExpression) str = {
 
 fn init_tokenizer(lexer: Lexer) Tokenizer = {
 	return Tokenizer {
+		parent = null,
 		tokens = [],
 		buffer = lexer.symbols,
 		linenum = 1,
@@ -268,12 +277,15 @@ fn initiate_block_token(kind: BlockKind, fun_name: (str | void) = void) *BlockTo
 	})!;
 };
 
-fn init_blockwise_tokenizer(symbols: []LexSymbol, block: *BlockToken, begin_linenum: int) Tokenizer = {
+fn init_blockwise_tokenizer(parent_tokenizer: *Tokenizer, block: *BlockToken, begin_linenum: int) Tokenizer = {
 	const symbols_clone: []LexSymbol = [];
-	for (const symbol .. symbols) {
+	for (const symbol .. parent_tokenizer.buffer) {
 		append(symbols_clone, symbol)!;
 	};
+	const is_parent_tokenizer_the_global_tokenizer = parent_tokenizer.parent == null;
+	const parent = if (!is_parent_tokenizer_the_global_tokenizer) parent_tokenizer else null;
 	return Tokenizer {
+		parent = parent,
 		tokens = [],
 		buffer = symbols_clone,
 		linenum = begin_linenum,
@@ -298,12 +310,10 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 	if (kind_of_next == LexKind::EQUALS) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
-		fmt::println("this 1")!;
 		cmp = "==";
 	} else if (kind_of_next == LexKind::EXCLAMATION) {
 		next(tokenizer);
 		next_expect(tokenizer, LexKind::EQUALS);
-		fmt::println("this 2")!;
 		cmp = "!=";
 	} else if (kind_of_next == LexKind::LESS) {
 		next(tokenizer);
@@ -327,7 +337,6 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 
 	expr2 = tokenizer_parse_expression(tokenizer);
 
-	fmt::println("expr2", expression_to_str(expr2))!;
 	const node = alloc(IfCondNode {
 		expr1 = expr1,
 		expr2 = expr2,
@@ -341,28 +350,19 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 	return node;
 };
 
-fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
-	const linenum = tokenizer.linenum;
-
+fn tokenizer_parse_cond(tokenizer: *Tokenizer) *CondTree = {
 	const tree = alloc(CondTree {
 		head = null
 	})!;
 
-	// after "if"
-	next_expect(tokenizer, LexKind::WHITESPACE);
-	skip_empty(tokenizer);
-
 	let keyword = "";
 	for (keyword != "do") {
-		fmt::printfln("kw '{}'", keyword)!;
-
 		const node = tokenizer_parse_if_node(tokenizer);
 		ll_push(tree: *LinkedList, node);
 
 		skip_empty(tokenizer);
 
 		keyword = next_till_nonchar(tokenizer);
-		fmt::println("keyword", keyword)!;
 
 		switch (keyword) {
 		case "and" =>
@@ -375,7 +375,6 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 			next_expect(tokenizer, LexKind::WHITESPACE);
 		case "do" => break;
 		case => 
-			fmt::println("what is it", peek_next(tokenizer).value)!;
 			if (peek_next(tokenizer).kind == LexKind::WHITESPACE) {
 				skip_empty(tokenizer);
 				fmt::println(peek_next(tokenizer).value)!;
@@ -386,8 +385,47 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 		};
 	};
 
+	return tree;
+};
+
+fn tokenizer_parse_while(tokenizer: *Tokenizer) void = {
+	const linenum = tokenizer.linenum;
+
+	// after "while"
+	next_expect(tokenizer, LexKind::WHITESPACE);
+	skip_empty(tokenizer);
+
+	const tree = tokenizer_parse_cond(tokenizer);
+
+	const block = initiate_block_token(BlockKind::WHILE);
+	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer, block, linenum + 1);
+	tokenizer_parse_block(&blockwise_tokenizer);
+	block.tokens = blockwise_tokenizer.tokens;
+	tokenizer.buffer = blockwise_tokenizer.buffer;
+
+	append(tokenizer.tokens, alloc(WhileToken {
+		tree = tree,
+		body = block,
+		linenum = linenum
+	})!)!;
+
+	// Go ahjead to avoid retokenizing from nested if tokenizer
+	for (let i = 0z; i < 4; i+= 1) {
+		next(tokenizer);
+	};
+};
+
+fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
+	const linenum = tokenizer.linenum;
+
+	// after "if"
+	next_expect(tokenizer, LexKind::WHITESPACE);
+	skip_empty(tokenizer);
+
+	const tree = tokenizer_parse_cond(tokenizer);
+
 	const block = initiate_block_token(BlockKind::IF);
-	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block, linenum + 1);
+	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer, block, linenum + 1);
 	tokenizer_parse_block(&blockwise_tokenizer);
 	block.tokens = blockwise_tokenizer.tokens;
 	tokenizer.buffer = blockwise_tokenizer.buffer;
@@ -481,7 +519,7 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	incr_linenum(tokenizer);
 
 	const block = initiate_block_token(BlockKind::FUN, fun_name);
-	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block, linenum + 1);
+	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer, block, linenum + 1);
 
 	const fundef_token = alloc(FunDefToken {
 		name = fun_name,
@@ -636,6 +674,8 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 			tokenizer_parse_fun(tokenizer);
 		} else if (keyword == "if") {
 			tokenizer_parse_if(tokenizer);
+		} else if (keyword == "while") {
+			tokenizer_parse_while(tokenizer);
 		} else if (keyword == "return") {
 			skip_empty(tokenizer);
 			// Return with nothing after it => void
@@ -818,6 +858,28 @@ type ParseExpressionContext = enum {
 	NONARG
 };
 
+fn find_variable_value(tokenizer: Tokenizer, variable_identifier: str) (AnyExpression | void) = {
+	const tokens = tokenizer.tokens;
+	fmt::println(len(tokens))!;
+	if (len(tokens) < 1) {
+		return void;
+		// if (!(tokenizer.parent is null)) {
+		//  	return find_variable_value(*(tokenizer.parent: *Tokenizer), variable_identifier);
+		// };
+	};
+	for (let i = len(tokens) - 1; i > 0; i -= 1) {
+		const token = tokens[i];
+		fmt::println("Halo", token_to_tokenkind(token))!;
+		match (token) {
+		case let variable_token: *VariableToken =>
+			if (variable_token.name == variable_identifier) {
+				return variable_token.value;
+			};
+		case => continue;
+		};
+	};
+};
+
 fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionContext = ParseExpressionContext::NONARG) AnyExpression = {
 	// is it string literal?
 	if (peek_next(tokenizer).kind == LexKind::QUOTE) {
@@ -867,10 +929,14 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionCon
 	// is it variable?
 	if (tokenizer_is_valid_variable(raw_value) && peek_next(tokenizer).kind != LexKind::PAREN_OPEN) {
 		const identifier = raw_value;
-		return alloc(VariableExpression {
+		const maybe_value = find_variable_value(*tokenizer, identifier);
+		match (maybe_value) {
+		case let expr: *Expression => return expr;
+		case => return alloc(VariableExpression {
 			name = identifier,
 			var = identifier
 		})!;
+		};
 	};
 
 	// is it function call expression?
@@ -886,8 +952,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionCon
 		for (peek_next(tokenizer).kind != LexKind::PAREN_CLOSE) {
 			if (peek_next(tokenizer).kind == LexKind::COMMA) next(tokenizer);
 			skip_empty(tokenizer);
-			const value = tokenizer_parse_expression(tokenizer);
-			ll_push(function_expression.arguments: *LinkedList, create_expr_node(value));
+			const value = tokenizer_parse_expression(tokenizer); ll_push(function_expression.arguments: *LinkedList, create_expr_node(value));
 		};
 
 		// Go next from PAREN_CLOSE
