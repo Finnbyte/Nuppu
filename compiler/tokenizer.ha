@@ -48,6 +48,8 @@ type GoToken = struct {
 
 type invalidexpression = !void;
 
+type variablenotfound = !void;
+
 type VariableKind = ExpressionKind;
 
 type ParameterToken = struct {
@@ -143,10 +145,18 @@ fn expression_to_str(anyexpr: AnyExpression) str = {
 			node = (node: *LinkedListNode).next;
 		};
 		yield format("{}({})", expr.name, join(args, ", "));
+	case let expr: *ArrayExpression =>
+		const values: []str = [];
+		const node = ll_first(expr.values: *LinkedList);
+		for (node != null) {
+			const exprNode = (node: *LinkedListNode).value: *ExprTreeNode;
+			append(values, expression_to_str(exprNode.value))!;
+			node = (node: *LinkedListNode).next;
+		};
+		yield join(values, ", ");
 	case => fmt::fatal("Unknown expression");
 	};
 };
-
 
 
 fn init_tokenizer(lexer: Lexer) Tokenizer = {
@@ -215,7 +225,6 @@ type Expression = struct {
 
 type FunctionExpression = struct {
 	name: str,
-	var: (str | void),
 	arguments: *ExprTree
 };
 
@@ -233,7 +242,8 @@ type CondTree = struct {
 
 type VariableExpression = struct {
 	name: str,
-	var: (str | void)
+	var: (str | void),
+	reference: (AnyExpression | ParameterToken | void)
 };
 
 type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression | *ArrayExpression);
@@ -532,11 +542,19 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 		linenum = linenum
 	})!;
 
-	// append(blockwise_tokenizer.tokens, fundef_token)!;
+	append(blockwise_tokenizer.tokens, fundef_token)!;
 
 	tokenizer_parse_block(&blockwise_tokenizer);
 
 	block.tokens = blockwise_tokenizer.tokens;
+
+	// Add implicit return to main function if last line isn't return
+	if (fun_name == "main" && !(block.tokens[len(block.tokens) - 1] is *ReturnToken)) {
+		append(block.tokens, alloc(ReturnToken {
+			value = create_expr(strings::toutf8("0"), ExpressionKind::INT),
+			linenum = tokenizer.linenum
+		})!)!;
+	};
 
 	append(tokenizer.tokens, fundef_token)!;
 
@@ -858,16 +876,17 @@ type ParseExpressionContext = enum {
 	NONARG
 };
 
-fn find_variable_value(tokenizer: Tokenizer, variable_identifier: str) (AnyExpression | void) = {
+fn find_variable_value(tokenizer: Tokenizer, variable_identifier: str) (AnyExpression | ParameterToken | variablenotfound) = {
 	const tokens = tokenizer.tokens;
 	fmt::println(len(tokens))!;
 	if (len(tokens) < 1) {
-		return void;
+		return variablenotfound;
 		// if (!(tokenizer.parent is null)) {
 		//  	return find_variable_value(*(tokenizer.parent: *Tokenizer), variable_identifier);
 		// };
 	};
-	for (let i = len(tokens) - 1; i > 0; i -= 1) {
+	for (let i = len(tokens) - 1; i >= 0; i -= 1) {
+		fmt::println(i)!;
 		const token = tokens[i];
 		fmt::println("Halo", token_to_tokenkind(token))!;
 		match (token) {
@@ -875,9 +894,16 @@ fn find_variable_value(tokenizer: Tokenizer, variable_identifier: str) (AnyExpre
 			if (variable_token.name == variable_identifier) {
 				return variable_token.value;
 			};
+		case let fundef: *FunDefToken =>
+			const params = fundef.proc.parameters;
+			for (const param .. params) {
+				if (param.name == variable_identifier) return param;
+			};
 		case => continue;
 		};
 	};
+
+	return variablenotfound;
 };
 
 fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionContext = ParseExpressionContext::NONARG) AnyExpression = {
@@ -931,11 +957,20 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionCon
 		const identifier = raw_value;
 		const maybe_value = find_variable_value(*tokenizer, identifier);
 		match (maybe_value) {
-		case let expr: *Expression => return expr;
-		case => return alloc(VariableExpression {
+		case let other_expr: AnyExpression => 
+			return alloc(VariableExpression {
+			reference = other_expr,
 			name = identifier,
 			var = identifier
 		})!;
+		case let parameter: ParameterToken => 
+			return alloc(VariableExpression {
+				reference = parameter,
+				name = identifier,
+				var = identifier
+			})!;
+		case variablenotfound => 
+			fmt::fatal("err", identifier);
 		};
 	};
 
@@ -946,7 +981,6 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionCon
 		const function_expression = alloc(FunctionExpression {
 			name = raw_value,
 			arguments = argument_tree,
-			var = void
 		})!;
 
 		for (peek_next(tokenizer).kind != LexKind::PAREN_CLOSE) {

@@ -133,6 +133,7 @@ type Qbe_WritePositionKind = enum {
 };
 
 type Qbe = struct {
+	write_seq: ([]str | void),
 	indent_level: size,
 	context: str,
 	buffer: []str,
@@ -157,6 +158,7 @@ fn qbe_initialize(base_file_path: str) Qbe = {
 	})!;
 
 	const qbe = Qbe {
+		write_seq = void,
 		context = "",
 		indent_level = 0,
 		buffer = [],
@@ -189,11 +191,21 @@ fn qbe_show_reg(reg: Qbe_Identifier) str = {
 fn qbe_get_reg_label(is_array: bool = false, identifier: (str | void) = void) Qbe_Identifier = {
 	let reg: str = @undefined;
 	if (identifier is str) {
-		reg = format("%{}", identifier as str);
+		if (is_array) {
+			reg = format("%.A_{}", identifier as str);
+			reg = ascii::strupper(reg)!;
+		} else {
+			reg = format("%{}", identifier as str);
+		};
 	} else {
+
 		reg = registers[0];
 		static delete(registers[0]);
+		if (is_array) {
+			reg = ascii::strupper(reg)!;
+		};
 	};
+
 	return Qbe_Identifier {
 		reg = reg,
 		kind = Qbe_IdentifierKind::REG,
@@ -223,13 +235,46 @@ fn qbe_set_indent(qbe: *Qbe, indent_level: size) void = {
 	qbe.indent_level = indent_level;
 };
 
+fn qbe_write_seq_begin(qbe: *Qbe) void = {
+	qbe.write_seq = [];
+	return;
+};
+
+fn qbe_write_seq_finish(qbe: *Qbe, write_to_buffer: bool = true) str = {
+	assert(qbe.write_seq is []str);
+
+	const write_seq = qbe.write_seq as []str;
+	for (const s .. write_seq) {
+		fmt::println(s)!;
+	};
+	const write_seq_output = strings::dup(join(write_seq))!;
+	fmt::println("seq out", write_seq_output)!;
+	qbe.write_seq = void;
+
+	if (write_to_buffer) qbe_write(qbe, write_seq_output)!;
+
+	return write_seq_output;
+};
+
 fn qbe_write(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionKind::APPEND) (void | nomem) = {
-	if (!strings::hassuffix(s, "\n")) {
+	const is_seq_in_progress = qbe.write_seq is []str;
+
+	if (!strings::hassuffix(s, "\n") && !is_seq_in_progress) {
 		s = strings::concat(s, "\n")!;
 	};
 
-	if (qbe.indent_level > 0) {
+	if (qbe.indent_level > 0 && !is_seq_in_progress) {
 		s = strings::lpad(s, ' ', len(s) + qbe.indent_level)?;
+	};
+
+	if (is_seq_in_progress) {
+		const write_seq = qbe.write_seq as []str;
+		fmt::println("append to write seq: ", s)!;
+		append(write_seq, s)!;
+		qbe.write_seq = write_seq;
+		fmt::println(len(qbe.write_seq: []str))!;
+		fmt::println(len(write_seq: []str))!;
+		return;
 	};
 
 	if (position is int) {
@@ -245,8 +290,20 @@ fn qbe_write(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionK
 };
 
 fn qbe_write_noindent(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_WritePositionKind::APPEND) (void | nomem) = {
-	if (!strings::hassuffix(s, "\n")) {
+	const is_seq_in_progress = qbe.write_seq is []str;
+
+	if (!strings::hassuffix(s, "\n") && !is_seq_in_progress) {
 		s = strings::concat(s, "\n")!;
+	};
+
+	if (is_seq_in_progress) {
+		const write_seq = qbe.write_seq as []str;
+		fmt::println("append to write seq: ", s)!;
+		append(write_seq, s)!;
+		qbe.write_seq = write_seq;
+		fmt::println(len(qbe.write_seq: []str))!;
+		fmt::println(len(write_seq: []str))!;
+		return;
 	};
 
 	if (position is int) {
@@ -260,11 +317,6 @@ fn qbe_write_noindent(qbe: *Qbe, s: str, position: Qbe_WritePosition = Qbe_Write
 		};
 	};
 };
-
-// fn qbe_writef(file: io::file, format: str, args: fmt::field...) (void | io::error) = {
-// 	const s = fmt::asprintf(format, args...)!;
-// 	io::write(file, strings::toutf8(s))!;
-// };
 
 fn qbe_compile(intermediary_file_path: str, output_file_path: str, remove_assembly_file: bool = true) (void | nomem | os::exec::error) = {
 	const assembly_file_path = strings::concat(output_file_path, ".s")?;
@@ -281,28 +333,6 @@ fn qbe_compile(intermediary_file_path: str, output_file_path: str, remove_assemb
 		// remove .s file because it confuses hare's internal compiler
 		os::remove(assembly_file_path)?;
 	};
-};
-
-fn qbe_define_variable(qbe: *Qbe, token: VariableToken) (Qbe_Variable | Qbe_Literal) = {
-	const datum = match (token.value) {
-		case let expr: *Expression => yield qbe_define_datum(qbe, token.value);	
-		case let expr: *VariableExpression => yield qbe_define_datum(qbe, token.value, token.name);	
-		case let expr: *FunctionExpression => yield qbe_define_datum(qbe, token.value, token.name);	
-	};
-	const reg = qbe_get_reg_label(false, token.name);
-	if (datum is Qbe_Literal) {
-		(datum: Qbe_Literal).text = format("{} ={}", qbe_show_reg(reg), get_datum_text(datum));
-	};
-	const var = Qbe_Variable {
-		reg = reg,
-		kind = get_datum_kind(datum),
-		src_variable = token.name,
-		value = void,
-		text = get_datum_text(datum),
-		is_emitted = false
-	};
-	qbe_scope_add_variable(qbe, var);
-	return datum;
 };
 
 fn qbe_commit(qbe: Qbe, file: io::file) void = {
@@ -354,71 +384,6 @@ fn qbe_define_expression(data_label: str, expression: Expression) str = {
 	case ExpressionKind::STR =>
 		return fmt::asprintf("l {}", data_label)!;
 	};
-};
-
-fn qbe_define_funcall_args(qbe: *Qbe, arguments: *ExprTree) str = {
-	const call_args: []str = [];
-	if (arguments.head != null) {
-		let node = ll_head(arguments: *LinkedList);
-		for (node != null) {
-			const value = (node.value: *ExprTreeNode).value;
-			match (value) {
-			case let arg: *Expression =>
-				switch (arg.kind) {
-				case ExpressionKind::INT =>
-					// const integer = qbe_define_literal_integer(qbe, arg.value);
-					append(call_args, format("l {}", expression_to_str(arg)))!;
-				case ExpressionKind::STR =>
-					const label = qbe_get_data_label();
-					const data = qbe_define_literal_str(qbe, label, arg);
-					qbe_write_noindent(qbe, (data.text as str), Qbe_WritePositionKind::PREPEND)!;
-					append(call_args, format("l {}", data.reg.reg))!;
-				};
-
-			case let arg: *FunctionExpression => 
-				const datum = qbe_define_datum(qbe, arg, arg.name);
-				qbe_write_datum(qbe, datum);
-				match (datum) {
-				case let datum: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
-				case => pass();
-				};
-				
-			case let arg: *VariableExpression => 
-				const result = qbe_scope_find_var_by_src_var(qbe, arg.name);
-				match (result) {
-				case let var: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(var.reg)))!;
-				case void => fmt::fatalf("qbe(funcall_args): Could not find variable: \"{}\"", arg.name);
-				};
-			};
-
-			if (node.next == null) break;
-			node = node.next: *LinkedListNode;
-		};
-	};
-
-	const result =  join(call_args, ", ");
-	return result;
-};
-
-fn qbe_define_funcall(qbe: *Qbe, token: FuncallToken) str = {
-	let text: str = @undefined;
-
-	// handle recursive fun call
-	if (token.name == qbe.scope.id) {
-		unimplemented("Recursive call");
-	};
-
-	// No args
-	if (ll_len(token.arguments: *LinkedList) == 0) {
-		text = format("call ${}()\n", token.name);
-		return text;
-	};
-
-	const arguments = qbe_define_funcall_args(qbe, token.arguments);
-
-	text = format("call ${}({})\n", token.name, arguments);
-	return text;
-
 };
 
 // fn qbe_define_store(reg: str, data_sz: size, data: []u8, data_kind: Qbe_VariableDataKind) str = {
@@ -496,15 +461,30 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Va
 		is_emitted = false
 	};
 
-	qbe_scope_add_variable(qbe, var);
-
 	return var;
 };
 
 fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
-	const variable = qbe_define_variable(qbe, token);
-	fmt::println("write var", get_datum_text(variable))!;
-	qbe_write_datum(qbe, variable);
+	// const datum = match (token.value) {
+	// 	case let expr: *Expression => yield qbe_define_datum(qbe, token.value);	
+	// 	case let expr: *VariableExpression => yield qbe_define_datum(qbe, token.value, token.name);	
+	// 	case let expr: *FunctionExpression => yield qbe_define_datum(qbe, token.value, token.name);	
+	// };
+	const datum = qbe_define_datum(qbe, token.value, token.name);
+	const reg = qbe_get_reg_label(false, token.name);
+	if (datum is Qbe_Literal) {
+		(datum: Qbe_Literal).text = format("{} ={}", qbe_show_reg(reg), get_datum_text(datum));
+	};
+	const var = Qbe_Variable {
+		reg = reg,
+		kind = get_datum_kind(datum),
+		src_variable = token.name,
+		value = void,
+		text = get_datum_text(datum),
+		is_emitted = false
+	};
+
+	qbe_write_datum(qbe, datum);
 };
 
 fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void) = void) (Qbe_Variable | Qbe_Literal) = {
@@ -521,22 +501,8 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 
 		// Easy case first: is it a literal integer?
 		fmt::println(src_identifier)!;
-		if (kind == VariableKind::INT && src_identifier is void) {
+		if (kind == VariableKind::INT) {
 			const integer = qbe_define_literal_integer(qbe, value);
-			if (src_identifier is str) {
-				fmt::println("wrote src identifier:", src_identifier)!; 
-				const var = Qbe_Variable { 
-					reg = qbe_get_reg_label(false, src_identifier),
-					src_variable = src_identifier,
-					kind = ExpressionKind::INT,
-					value = expr: *Expression,
-					// must recursively expand args tho... since qbe doesn't
-					// support inline calls
-					text = integer.text,
-					is_emitted = false
-				};
-				qbe_scope_add_variable(qbe, var);
-			};
 			return integer;
 		};
 
@@ -549,15 +515,23 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const allocation = qbe_define_allocation(qbe, value_size, value, kind, src_identifier);
 		return allocation;
 	case let expr: *FunctionExpression => 
-		fmt::println("triyng to find", src_identifier)!;
-		const reg = match (src_identifier) {
-		case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
-			case let var: Qbe_Variable => yield var.reg;
-			case void => yield qbe_get_reg_label(false, src_identifier);
-		};
-		case void => yield qbe_get_reg_label(false, src_identifier);
-		};
-		const text = indent(format("{} =l call ${}({})", qbe_show_reg(reg), expr.name, qbe_define_funcall_args(qbe, expr.arguments)), qbe.indent_level);
+		// fmt::println("triyng to find", src_identifier)!;
+		// const reg = match (src_identifier) {
+		// case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
+		// 	case let var: Qbe_Variable => yield var.reg;
+		// 	case void => yield qbe_get_reg_label(false, src_identifier);
+		// };
+		// case void => yield qbe_get_reg_label(false, src_identifier);
+		// };
+		const reg = qbe_get_reg_label(false, src_identifier);
+		qbe_write_seq_begin(qbe);
+		fmt::println("eka", qbe.write_seq is []str)!;
+		qbe_write(qbe, format("{} =l ", qbe_show_reg(reg)))!;
+		fmt::println("toka", qbe.write_seq is []str)!;
+		qbe_write_funcall(qbe, expr.name, expr.arguments);
+		fmt::println("kolmas", qbe.write_seq is []str)!;
+		const text = qbe_write_seq_finish(qbe, false);
+		fmt::println("text that shi", text)!;
 		const var = Qbe_Variable {
 			reg = reg,
 			src_variable = src_identifier,
@@ -568,36 +542,43 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			text = text,
 			is_emitted = false
 		};
-		qbe_scope_add_variable(qbe, var);
+
 		return var;
 	case let expr: *VariableExpression => 
-		fmt::println(expr.name, src_identifier)!;
-		const result = qbe_scope_find_var_by_src_var(qbe, expr.name);
-		match (result) {
-		case let var: Qbe_Variable => 
-			let is_match = false;
-			const reg = match (src_identifier) {
-			case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
-				case let var: Qbe_Variable => 
-					is_match = true;
-					yield var.reg;
-				case void => yield qbe_get_reg_label(false, identifier);
-			};
-			case void => yield qbe_get_reg_label(false, expr.name);
-			};
-			const text = indent(format("{} =l copy {}", qbe_show_reg(reg), qbe_show_reg(var.reg)), qbe.indent_level);
+		match (expr.reference) {
+		// is parameter
+		case let parameter: ParameterToken =>
+			const reg = qbe_get_reg_label(false, src_identifier);
+			const src_reg = qbe_get_reg_label(false, expr.name);
+			const text = indent(format("{} =l copy {}", qbe_show_reg(reg), qbe_show_reg(src_reg)), qbe.indent_level);
 			const new_var = Qbe_Variable {
 				reg = reg,
 				src_variable = src_identifier,
-				value = var.value,
-				kind = var.kind,
+				value = void,
+				kind = parameter.kind,
 				text = text,
-				is_emitted = is_match 
+				is_emitted = false 
 			};
-			qbe_scope_add_variable(qbe, new_var);
 			return new_var;
-		case void => fmt::fatalf("line {}: could not find variable \"{}\" in scope while parsing variable expression", linenum(), expr.name);
-			
+		case let expr: AnyExpression =>
+			const result = qbe_define_datum(qbe, expr, src_identifier);
+			fmt::println(expression_to_str(expr))!;
+			fmt::println(get_datum_text(result))!;
+			return result;
+			// fmt::println(expression_to_str(expr))!;
+			// const reg = qbe_get_reg_label(false, src_identifier);
+			// const src_reg = qbe_get_reg_label(false);
+			// const text = indent(format("{} =l copy {}", qbe_show_reg(reg), qbe_show_reg(src_reg)), qbe.indent_level);
+			// const new_var = Qbe_Variable {
+			// 	reg = reg,
+			// 	src_variable = src_identifier,
+			// 	value = expr.value,
+			// 	kind = expr.kind,
+			// 	text = text,
+			// 	is_emitted = false 
+			// };
+			// return new_var;
+
 		};
 	case let expr: *ArrayExpression =>
 		const reg = qbe_get_reg_label(true, src_identifier);
@@ -650,7 +631,6 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			is_emitted = false
 		};
 
-		qbe_scope_add_variable(qbe, var);
 		return var;
 		// for (node != null) {
 		// 	const expr1 = (node as *IfCondNode).expr1;
@@ -739,7 +719,7 @@ fn qbe_scope_find_var_by_src_var(qbe: *Qbe, src_var_to_find: str) (Qbe_Variable 
 	return void;
 };
 
-fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
+fn qbe_write_funcall(qbe: *Qbe, name: str, arguments: *ExprTree) void = {
 	// handle recursive fun call
 	// if (token.name == qbe.scope.id) {
 	// 	qbe_write(qbe, "call $lol(l %b0)")!;
@@ -747,14 +727,54 @@ fn qbe_write_funcall(qbe: *Qbe, token: FuncallToken) void = {
 	// };
 
 	// No args
-	if (ll_len(token.arguments: *LinkedList) == 0) {
-		qbe_write(qbe, format("call ${}()\n", token.name))!;
+	if (ll_len(arguments: *LinkedList) == 0) {
+		qbe_write(qbe, format("call ${}()\n", name))!;
 		return;
 	};
 
-	const arguments = qbe_define_funcall_args(qbe, token.arguments);
+	const call_args: []str = [];
+	if (arguments.head != null) {
+		let node = ll_head(arguments: *LinkedList);
+		for (node != null) {
+			const value = (node.value: *ExprTreeNode).value;
+			match (value) {
+			case let arg: *Expression =>
+				switch (arg.kind) {
+				case ExpressionKind::INT =>
+					// const integer = qbe_define_literal_integer(qbe, arg.value);
+					append(call_args, format("l {}", expression_to_str(arg)))!;
+				case ExpressionKind::STR =>
+					const label = qbe_get_data_label();
+					const data = qbe_define_literal_str(qbe, label, arg);
+					qbe_write_noindent(qbe, (data.text as str), Qbe_WritePositionKind::PREPEND)!;
+					append(call_args, format("l {}", data.reg.reg))!;
+				};
 
-	qbe_write(qbe, format("call ${}({})\n", token.name, arguments))!;
+			case let arg: *FunctionExpression => 
+				const datum = qbe_define_datum(qbe, arg, arg.name);
+				qbe_write_datum(qbe, datum);
+				match (datum) {
+				case let datum: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
+				case => pass();
+				};
+				
+			case let arg: *VariableExpression => 
+				match (arg.reference) {
+				case let expr: *ArrayExpression =>
+					append(call_args, format("l %.A_{}0", ascii::strupper(arg.name)!))!;
+				case =>
+					append(call_args, format("l %{}", arg.name))!;
+				};
+			};
+
+			if (node.next == null) break;
+			node = node.next: *LinkedListNode;
+		};
+	};
+
+	const result =  join(call_args, ", ");
+
+	qbe_write(qbe, format("call ${}({})\n", name, result))!;
 };
 
 fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
@@ -767,22 +787,9 @@ fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 		};
 		// FEAT: make uppercase for strings
 		append(out, format("l {}", identifier.reg))!;
-		qbe_scope_add_variable(qbe, Qbe_Variable {
-			kind = arg.kind,
-			reg = identifier,
-			src_variable = arg.name,
-			value = void,
-			text = format("l {}", qbe_show_reg(identifier)),
-			is_emitted = true
-		});
 	};
 
 	return join(out, ", ");
-};
-
-fn qbe_scope_add_variable(qbe: *Qbe, variable: Qbe_Variable) void = {
-	const scope = qbe.scopes[len(qbe.scopes) - 1];
-	append(scope.variables, clone_qbe_variable(variable))!;
 };
 
 fn qbe_add_global_data(qbe: *Qbe, variable: Qbe_Variable) void = {
@@ -790,57 +797,8 @@ fn qbe_add_global_data(qbe: *Qbe, variable: Qbe_Variable) void = {
 	append(scope.variables, clone_qbe_variable(variable))!;
 };
 
-fn qbe_scope_push(qbe: *Qbe, scope_id: str, scope_kind: Qbe_ScopeKind) void = {
-	// TODO: push current scope items into new scope.
-	// this means to treat the scope as a sort-of *stack*.
-	
-	const new_scope: *Qbe_Scope = alloc(Qbe_Scope {
-		id = scope_id,
-		kind = scope_kind,
-		variables = []
-	})!;
-
-	append(qbe.scopes, new_scope)!;
-	qbe.scope = new_scope;
-};
-
-fn qbe_scope_pop(qbe: *Qbe) void = {
-	assert(len(qbe.scopes) > 1);
-	delete(qbe.scopes[len(qbe.scopes) - 1]);
-	qbe.scope = qbe.scopes[len(qbe.scopes) - 1];
-};
-
-fn qbe_scope_update_var(qbe: *Qbe, new_var: Qbe_Variable) void = {
-	for (let i = 0z; i < len(qbe.scope.variables) - 1; i += 1) {
-		const var = qbe.scope.variables[i];
-		if (qbe_regs_are_equal(var.reg, new_var.reg)) {
-			qbe.scope.variables[i] = new_var;
-			return;
-		};
-	};
-};
-
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
-	qbe_scope_push(qbe, token.name, Qbe_ScopeKind::FUN);
-
 	const parameters = token.proc.parameters;
-	for (const param .. parameters) {
-		fmt::println("Add param", param.name)!;
-		qbe_scope_add_variable(qbe, Qbe_Variable {
-		reg = Qbe_Identifier {
-		reg = format("%{}", param.name),
-		kind = Qbe_IdentifierKind::REG,
-		index = void
-	},
-		src_variable = param.name,
-		kind = ExpressionKind::INT,
-		value = void,
-		// must recursively expand args tho... since qbe doesn't
-		// support inline calls
-		text = "",
-		is_emitted = true
-	});
-	};
 
 	// Write nested functions beforehand
 	for (const token .. token.body.tokens[1..]) {
@@ -864,13 +822,13 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	qbe_write_block(qbe, *token.body);
 	qbe_set_indent(qbe, 0);
 	qbe_write(qbe, "}")!;
-	qbe_scope_pop(qbe);
 };
 
 fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
-	for (const token .. token.tokens) {
-		if (token is *ReturnToken) {
-			const value = (token as *ReturnToken).value;
+	for (const token .. token.tokens[1..]) {
+		match (token) { 
+		case let token: *ReturnToken =>
+			const value = token.value;
 			match (value) {
 			case let expr: *Expression => qbe_write(qbe, format("ret {}", expression_to_str(expr)))!;
 			case let expr: *VariableExpression => qbe_write(qbe, format("ret %{}", expr.name))!;
@@ -879,20 +837,18 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 				const result = qbe_write_datum(qbe, datum);
 				qbe_write(qbe, format("ret {}", result))!;
 			};
-
-		};
-		if (token is *FuncallToken) {
-			qbe_write_funcall(qbe, *(token as *FuncallToken));
-		} else if (token is *VariableToken) {
-			qbe_write_variable(qbe, *(token as *VariableToken));
-		} else if (token is *IfToken) {
-			qbe_write_if(qbe, *(token as *IfToken));
-		} else if (token is *LabelToken) {
-			qbe_write(qbe, format("@{}", (token as *LabelToken).name))!;
-		} else if (token is *WhileToken) {
-			qbe_write_while(qbe, *(token as *WhileToken));
-		} else if (token is *GoToken) {
-			qbe_write(qbe, format("jmp @{}", (token as *GoToken).label))!;
+		case let token: *FuncallToken =>
+			qbe_write_funcall(qbe, token.name, token.arguments);
+		case let token: *VariableToken =>
+			qbe_write_variable(qbe, *token);
+		case let token: *IfToken =>
+			qbe_write_if(qbe, *token);
+		case let token: *LabelToken =>
+			qbe_write(qbe, format("@{}", token.name))!;
+		case let token: *WhileToken =>
+			qbe_write_while(qbe, *token);
+		case let token: *GoToken =>
+			qbe_write(qbe, format("jmp @{}", token.label))!;
 		};
 	};
 
@@ -1000,10 +956,8 @@ fn qbe_write_while(qbe: *Qbe, token: IfToken) void = {
 			};
 		case => panic(format("Unsupported operator: {}", cmp))!;
 		};
-		qbe_scope_push(qbe, "if", Qbe_ScopeKind::IF);
 		qbe_write_block(qbe, *token.body);
 		qbe_write(qbe, format("jnz %eql, @while{}, @endwhile{}", curr_whilei, curr_whilei))!;
-		qbe_scope_pop(qbe);
 		qbe_write_noindent(qbe, format("@endwhile{}", curr_whilei))!;
 		node = (node as *IfCondNode).next;
 	};
@@ -1074,10 +1028,8 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		ifi += 1;
 		qbe_write(qbe, format("jnz %eql, @if{}t, @if{}f", curr_ifi, curr_ifi))!;
 		qbe_write_noindent(qbe, format("@if{}t", curr_ifi))!;
-		qbe_scope_push(qbe, "if", Qbe_ScopeKind::IF);
 		fmt::println(display_token_tree((*token.body).tokens))!;
 		qbe_write_block(qbe, *token.body);
-		qbe_scope_pop(qbe);
 		qbe_write_noindent(qbe, format("@if{}f", curr_ifi))!;
 		node = (node as *IfCondNode).next;
 	};
