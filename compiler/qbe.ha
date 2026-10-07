@@ -496,9 +496,24 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		// };
 
 		// Easy case first: is it a literal integer?
-		if (kind == VariableKind::INT && src_identifier is void) {
-			const integer = qbe_define_literal_integer(qbe, value);
-			return integer;
+		if (kind == VariableKind::INT) {
+			if (src_identifier is void) {
+				const integer = qbe_define_literal_integer(qbe, value);
+				return integer;
+			} else {
+				const reg = qbe_get_reg_label(false, src_identifier);
+				const text = indent(format("{} =l copy {}", qbe_show_reg(reg), expression_to_str(expr)), qbe.indent_level);
+				const var = Qbe_Variable {
+					reg = reg,
+					src_variable = src_identifier,
+					value = expr,
+					kind = kind,
+					text = text,
+					is_emitted = false
+				};
+				qbe_scope_add_variable(qbe, var);
+				return var;
+			};
 		};
 
 		// Other easy case: is it literal string?
@@ -949,7 +964,5 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		qbe_write_noindent(qbe, format("@if{}f", curr_ifi))!;
 		node = (node as *IfCondNode).next;
 	};
-
-
 };
 
