@@ -37,6 +37,9 @@ compile_and_run() {
 	exit 0
 }
 
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+		usage 0
+fi
 [ $# -lt 1 ] && echo "Missing mode.\n" && usage 1
 [ $# -lt 2 ] && echo "Missing input file.\n" && usage 1
 
