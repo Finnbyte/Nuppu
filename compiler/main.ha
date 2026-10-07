@@ -200,6 +200,8 @@ export fn main() void = {
 	// Parse globally
 	tokenizer_parse_buffer(&globalTokenizer);
 
+	// analyze(globalTokenizer.tokens);
+
 	if (enable_debug_flag) {
 		// Show tokenizer table for debugging
 		print_tokenizer_table(globalTokenizer);

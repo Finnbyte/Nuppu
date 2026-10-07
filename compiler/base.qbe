@@ -2,6 +2,7 @@ data $echofmts = { b "%s\n", b 0 }
 data $echofmtd = { b "%d\n", b 0 }
 data $fmtd = { b "%d", b 0 }
 data $fmts = { b "%s", b 0 }
+data $test = { b "%p %p\n", b 0 }
 
 function l $__add(l %x, l %c) {
 	@start
@@ -38,4 +39,17 @@ function l $__itoa(l %x) {
 		%X0 =l alloc4 8
 		call $sprintf(l %X0, l $fmtd, l %x)
 		ret %X0
+}
+
+function l $__idx(l %X0) {
+	@start
+	%X1 =l add %X0, 1
+	call $printf(l $test, l %X0, l %X1)
+	ret 0
+}
+
+function l $__val(l %addr) {
+	@start
+	%x =l loadl %addr
+	ret %x
 }

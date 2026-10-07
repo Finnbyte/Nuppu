@@ -1,28 +1,123 @@
-fun add(a: int, b: int) is
-	let result: int = __add(a, b)
+// Basic Operations //
+fun add(a: int, b: int) -> int =
+	result: int := __add(a, b)
 	return result
 end
 
-fun sub(a: int, b: int) is
-	let result: int = __sub(a, b)
+fun sub(a: int, b: int) -> int =
+	result: int := __sub(a, b)
 	return result
 end
 
-fun mul(a: int, b: int) is
-	let result: int = __mul(a, b)
+fun mul(a: int, b: int) -> int =
+	result: int := __mul(a, b)
 	return result
 end
 
-fun div(a: int, b: int) is
-	let result: int = __div(a, b)
+fun div(a: int, b: int) -> int =
+	result: int := __div(a, b)
 	return result
 end
 
-fun echo(s: str) is
+fun mod(a: int, b: int) -> int =
+	result: int := __mod(a, b)
+	return result
+end
+
+// Memory //
+fun itoa(num: int) -> str =
+	return __itoa(num)
+end
+
+fun val(addr: int) -> int =
+	return __val(addr)
+end
+
+fun __to_aligned(pos: int) -> int =
+	return mul(pos, 8)
+end
+
+// Stdout //
+fun echo(s: str) -> none =
 	printf("%s\n", s)
 	return 0
 end
 
-fun itoa(num: int) is
-	return __itoa(num)
+fun print_empty(n: int) -> none =
+	i := n
+	:loop
+	if i <= 0 do
+		go end
+	end
+	i = sub(i, 1)
+	printf(" ")
+	go loop
+	:end
+	return 0
 end
+
+// Lists //
+
+fun nth(array_begin_addr: int, index: int) -> int =
+	aligned_index := mul(index, 8)
+	p := add(array_begin_addr, aligned_index)
+	return val(p)
+end
+
+fun fst(array_begin_addr: int, index: int) -> int =
+	p := add(array_begin_addr, 0)
+	return val(p)
+end
+
+fun snd(array_begin_addr: int) -> int =
+	p := add(array_begin_addr, 8)
+	return val(p)
+end
+
+fun head(array_begin_addr: int) -> int =
+	// head and fst are the same thing
+	return fst(array_begin_addr)
+end
+
+fun drop(array_begin_addr: int, array_length: int, count: int) -> int =
+	aligned_length := __to_aligned(array_length)
+	dest_list := malloc(aligned_length)
+	memcpy(dest_list, array_begin_addr, aligned_length)
+	dest_list = add(dest_list, __to_aligned(count))
+	return dest_list
+end
+
+fun range(start: int, end: int) -> int =
+	length := sub(end, start)
+	sz := mul(length, 8)
+	list := malloc(sz)
+	idx := 0
+	counter := start
+
+	:loop
+	if idx >= length do 
+		go end 
+	end
+	p := add(list, __to_aligned(idx))
+	memset(p, counter, 1)
+	idx = add(idx, 1)
+	counter = add(counter, 1)
+	go loop
+
+	:end
+	return list
+end
+
+// Strings //
+
+fun string_len(string: int) -> int =
+	return strlen(string)
+end
+
+fun string_dup(string: int) -> int =
+	length := strlen(string)
+	p := malloc(length)
+	strncpy(p, string, length)
+	return p
+end
+

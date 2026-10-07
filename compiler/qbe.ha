@@ -28,11 +28,7 @@ let ifi = 0;
 
 fn clone_qbe_variable(variable: Qbe_Variable) Qbe_Variable = {
 	const var = Qbe_Variable {
-		reg = Qbe_Identifier {
-			reg= strings::dup(variable.reg.reg)!,
-			kind= variable.reg.kind,
-			index= variable.reg.index
-		},
+		reg = clone_qbe_reg(variable.reg),
 		src_variable= if (variable.src_variable is str) strings::dup(variable.src_variable as str)! else void,
 		value = clone_expression(variable.value),
 		kind= variable.kind,
@@ -40,6 +36,15 @@ fn clone_qbe_variable(variable: Qbe_Variable) Qbe_Variable = {
 		is_emitted= variable.is_emitted
 	};
 	return var;
+};
+
+fn clone_qbe_reg(reg: Qbe_Identifier) Qbe_Identifier = {
+	const reg = Qbe_Identifier {
+		reg = strings::dup(reg.reg)!,
+		kind = reg.kind,
+		index = reg.index
+	};
+	return reg;
 };
 
 type Qbe_Identifier = struct {
@@ -57,6 +62,11 @@ type Qbe_Variable = struct {
 	is_emitted: bool
 };
 
+type Qbe_Literal = struct {
+	kind: ExpressionKind,
+	text: str,
+};
+
 type Qbe_ScopeKind = enum {
 	FUN,
 	IF,
@@ -67,6 +77,13 @@ type Qbe_Scope = struct {
 	id: str,
 	kind: Qbe_ScopeKind,
 	variables: []Qbe_Variable
+};
+
+fn get_datum_kind(datum: (Qbe_Variable | Qbe_Literal)) ExpressionKind = {
+	return match (datum) {
+	case let variable: Qbe_Variable => yield variable.kind;
+	case let literal: Qbe_Literal => yield literal.kind;
+	};
 };
 
 fn get_variable_reg(qbe: *Qbe, variable_identifier: str) Qbe_Identifier = {
@@ -161,17 +178,18 @@ fn qbe_show_reg(reg: Qbe_Identifier) str = {
 	return format("{}{}", reg.reg, if (reg.index is int) reg.index else "");
 };
 
-fn qbe_get_reg_label(is_array: bool = false) Qbe_Identifier = {
-	let reg = registers[0];
-	static delete(registers[0]);
-	switch (is_array) {
-	case true => reg = format("{}0", ascii::strupper(reg)!);
-	case false => reg = reg;
+fn qbe_get_reg_label(is_array: bool = false, identifier: (str | void) = void) Qbe_Identifier = {
+	let reg: str = @undefined;
+	if (identifier is str) {
+		reg = format("%{}", identifier as str);
+	} else {
+		reg = registers[0];
+		static delete(registers[0]);
 	};
 	return Qbe_Identifier {
 		reg = reg,
 		kind = Qbe_IdentifierKind::REG,
-		index = 0
+		index = if (is_array) 0 else void
 	};
 
 };
@@ -324,9 +342,8 @@ fn qbe_define_funcall_args(qbe: *Qbe, arguments: *ExprTree) str = {
 			case let arg: *Expression =>
 				switch (arg.kind) {
 				case ExpressionKind::INT =>
-					const integer = qbe_define_literal_integer(qbe, arg.value);
-					qbe_write(qbe, (integer.text as str))!;
-					append(call_args, format("l {}", qbe_show_reg(integer.reg)))!;
+					// const integer = qbe_define_literal_integer(qbe, arg.value);
+					append(call_args, format("l {}", expression_to_str(arg)))!;
 				case ExpressionKind::STR =>
 					const label = qbe_get_data_label();
 					const data = qbe_define_literal_str(qbe, label, arg);
@@ -337,12 +354,16 @@ fn qbe_define_funcall_args(qbe: *Qbe, arguments: *ExprTree) str = {
 			case let arg: *FunctionExpression => 
 				const datum = qbe_define_datum(qbe, arg, arg.name);
 				qbe_write_datum(qbe, datum);
-				append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
+				match (datum) {
+				case let datum: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
+				case => pass();
+				};
+				
 			case let arg: *VariableExpression => 
 				const result = qbe_scope_find_var_by_src_var(qbe, arg.name);
 				match (result) {
 				case let var: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(var.reg)))!;
-				case void => fmt::fatal("Could not find variable");
+				case void => fmt::fatalf("Could not find variable: \"{}\"", arg.name);
 				};
 			};
 
@@ -415,7 +436,7 @@ fn indent_buf(buf: []str, indent_level: size) void = {
 fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_VariableDataKind, data_identifier: (str | void) = void) Qbe_Variable = {
 	const scope = qbe.scope;
 	let out: []str = [];
-	const reg = qbe_get_reg_label(true);
+	const reg = qbe_get_reg_label(true, data_identifier);
 	append(out, format("{} =l call $malloc(w {})", qbe_show_reg(reg), figure_malloc_size(data_sz, data_kind)))!;
 	if (data_sz > 1 && data_kind == Qbe_VariableDataKind::STR && !(data_identifier is void)) {
 		append(out, format("storel {}, {}", data[0], qbe_show_reg(reg)))!;
@@ -456,11 +477,12 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Va
 };
 
 fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
+	fmt::println("write variable", token.name)!;
 	const datum = qbe_define_datum(qbe, token.value, token.name);
 	qbe_write_datum(qbe, datum);
 };
 
-fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void) = void) Qbe_Variable = {
+fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void) = void) (Qbe_Variable | Qbe_Literal) = {
 	match (expr) {
 	case let expr: *Expression => 
 		const value = expr.value;
@@ -474,8 +496,8 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		// };
 
 		// Easy case first: is it a literal integer?
-		if (kind == VariableKind::INT) {
-			const integer = qbe_define_literal_integer(qbe, value, src_identifier);
+		if (kind == VariableKind::INT && src_identifier is void) {
+			const integer = qbe_define_literal_integer(qbe, value);
 			return integer;
 		};
 
@@ -488,7 +510,14 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const allocation = qbe_define_allocation(qbe, value_size, value, kind, src_identifier);
 		return allocation;
 	case let expr: *FunctionExpression => 
-		const reg = qbe_get_reg_label();
+		fmt::println("triyng to find", src_identifier)!;
+		const reg = match (src_identifier) {
+		case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
+			case let var: Qbe_Variable => yield var.reg;
+			case void => yield qbe_get_reg_label(false, src_identifier);
+		};
+		case void => yield qbe_get_reg_label(false, src_identifier);
+		};
 		const text = indent(format("{} =l call ${}({})", qbe_show_reg(reg), expr.name, qbe_define_funcall_args(qbe, expr.arguments)), qbe.indent_level);
 		const var = Qbe_Variable {
 			reg = reg,
@@ -506,10 +535,16 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const result = qbe_scope_find_var_by_src_var(qbe, expr.name);
 		match (result) {
 		case let var: Qbe_Variable => 
-			const identifier = qbe_get_reg_label();
-			const text = indent(format("{} =l copy {}", qbe_show_reg(identifier), qbe_show_reg(var.reg)), qbe.indent_level);
+			const reg = match (src_identifier) {
+			case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
+				case let var: Qbe_Variable => yield var.reg;
+				case void => yield qbe_get_reg_label(false, identifier);
+			};
+			case void => yield qbe_get_reg_label(false, expr.name);
+			};
+			const text = indent(format("{} =l copy {}", qbe_show_reg(reg), qbe_show_reg(var.reg)), qbe.indent_level);
 			const new_var = Qbe_Variable {
-				reg = identifier,
+				reg = reg,
 				src_variable = src_identifier,
 				value = var.value,
 				kind = var.kind,
@@ -520,57 +555,85 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 			return new_var;
 		case void => fmt::fatalf("line {}: could not find variable \"{}\" in scope", linenum(), expr.name);
 		};
+	case let expr: *ArrayExpression =>
+		const reg = qbe_get_reg_label(true, src_identifier);
+
+		const output: []str = [];
+		
+		const elem_count = ll_len(expr.values: *LinkedList);
+		append(output, format("{} =l alloc8 {}", qbe_show_reg(reg), elem_count * 8))!;
+
+		let node = ll_head(expr.values: *LinkedList);
+		if (node != null) {
+			const value = (node.value: *ExprTreeNode).value;
+			// add first value
+			append(output, format("storel {}, {}", expression_to_str(value), qbe_show_reg(reg)))!;
+			node = node.next: *LinkedListNode;
+
+			// fmt::println("Len of tree for arr expr:", ll_len(expr.values: *LinkedList))!;
+			for (node != null) {
+				const value = (node.value: *ExprTreeNode).value;
+				const new_index = (reg.index as int) + 1;
+				const og_reg_text = qbe_show_reg(reg);
+				reg.index = new_index;
+				const new_reg_text = qbe_show_reg(reg);
+				append(output, format("{} =l add {}, 8", new_reg_text, og_reg_text))!;
+				append(output, format("storel {}, {}", expression_to_str(value), qbe_show_reg(reg)))!;
+
+				node = node.next: *LinkedListNode;
+			};
+
+			// add null pointer
+			const next_reg = clone_qbe_reg(reg);
+			next_reg.index = (next_reg.index as int) + 1;
+			append(output, format("{} =l add {}, 8",  qbe_show_reg(next_reg), qbe_show_reg(reg)))!;
+			append(output, format("storeb {}, {}", "0", qbe_show_reg(next_reg)))!;
+
+			// reset index to array beginning
+			reg.index = 0;
+
+		};
+		const text = join(output, "\n");
+
+		const var = Qbe_Variable {
+			reg = reg,
+			src_variable = src_identifier,
+			kind = ExpressionKind::INT,
+			value = void,
+			// must recursively expand args tho... since qbe doesn't
+			// support inline calls
+			text = text,
+			is_emitted = false
+		};
+
+		qbe_scope_add_variable(qbe, var);
+		return var;
+		// for (node != null) {
+		// 	const expr1 = (node as *IfCondNode).expr1;
+		// 	const expr2 = (node as *IfCondNode).expr2;
+		// 	const cmp = (node as *IfCondNode).cmp;
+		// 	const expr1alloc = qbe_define_datum(qbe, expr1);
+		// 	const expr2alloc = qbe_define_datum(qbe, expr2);
+		// 	qbe_write(qbe, "# if's datums")!;
+		// 	qbe_write_datum(qbe, expr1alloc);
+		// 	qbe_write_datum(qbe, expr2alloc);
+		// 	qbe_write(qbe, "# end")!;
+
+		// 	let cmpreg1: Qbe_Identifier = @undefined;
+		// 	let cmpreg2: Qbe_Identifier = @undefined;
+
+		// 	if (expr1alloc.kind != expr2alloc.kind) {
+		// 		fmt::fatal("TYPE_ERROR: cannot compare different data types");
 	case => fmt::fatal("Incorrect expr type encountered while writing datum",);
 	};
 };
 
-fn qbe_define_literal_integer(qbe: *Qbe, data: []u8, src_identifier: (str | void) = void) Qbe_Variable = {
-	const reg = qbe_get_reg_label();
-	const text = format("{} =l copy {}\n", qbe_show_reg(reg), strings::fromutf8_unsafe(data));
+fn qbe_define_literal_integer(qbe: *Qbe, data: []u8) Qbe_Literal = {
+	const text = format("l {}", strings::fromutf8_unsafe(data));
 
-	const var = Qbe_Variable {
-		reg = reg,
-		src_variable = src_identifier,
-		kind = ExpressionKind::INT,
-		value = alloc(Expression {
-			value = data,
-			value_size = 8,
-			kind = ExpressionKind::INT,
-		})!,
+	return Qbe_Literal {
 		text = text,
-		is_emitted = false
-	};
-
-	qbe_scope_add_variable(qbe, var);
-
-	return var;
-};
-
-fn qbe_define_blit(qbe: *Qbe, src_reg: Qbe_Identifier, bytes_amount: size) Qbe_Blit = {
-	const dest_reg = qbe_get_reg_label(true);
-	const dest_reg_str = qbe_show_reg(dest_reg);
-	const src_reg_str = qbe_show_reg(src_reg);
-	const out: []str = [];
-
-	append(out, format("{} =l alloc8 {}", dest_reg_str, bytes_amount))!;
-
-	const var = qbe_scope_find_var_by_reg(qbe, src_reg);
-	if (var is void) {
-		fmt::fatal("COULD NOT FIND VARIABLE");
-	};
-
-	if ((var as Qbe_Variable).kind == ExpressionKind::INT) {
-		append(out, format("storel {}, {}", src_reg_str, dest_reg_str))!;
-	} else {
-		append(out, format("blit {}, {}, {}", src_reg_str, dest_reg_str, bytes_amount))!;
-	};
-
-	indent_buf(out, qbe.indent_level);
-
-	return Qbe_Blit {
-		reg = dest_reg,
-		text = join(out, "\n")
-
+		kind = ExpressionKind::INT
 	};
 };
 
@@ -715,6 +778,25 @@ fn qbe_scope_update_var(qbe: *Qbe, new_var: Qbe_Variable) void = {
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	qbe_scope_push(qbe, token.name, Qbe_ScopeKind::FUN);
 
+	const parameters = token.proc.parameters;
+	for (const param .. parameters) {
+		fmt::println("Add param", param.name)!;
+		qbe_scope_add_variable(qbe, Qbe_Variable {
+		reg = Qbe_Identifier {
+		reg = format("%{}", param.name),
+		kind = Qbe_IdentifierKind::REG,
+		index = void
+	},
+		src_variable = param.name,
+		kind = ExpressionKind::INT,
+		value = void,
+		// must recursively expand args tho... since qbe doesn't
+		// support inline calls
+		text = "",
+		is_emitted = true
+	});
+	};
+
 	// Write nested functions beforehand
 	for (const token .. token.body.tokens[1..]) {
 		match (token) {
@@ -729,7 +811,7 @@ fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
 	if (token.name == "main") {
 		qbe_write(qbe, "export function w $main() {")!;
 	} else {
-		qbe_write(qbe, format("function w ${}({}) {{", token.name, qbe_define_function_parameters(qbe, *token.proc)))!;
+		qbe_write(qbe, format("function l ${}({}) {{", token.name, qbe_define_function_parameters(qbe, *token.proc)))!;
 	};
 
 	qbe_write(qbe, "@start")!;
@@ -744,9 +826,11 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 	let index = 0;
 	for (const token .. token.tokens) {
 		if (token is *ReturnToken) {
-			const datum = qbe_define_datum(qbe, (token as *ReturnToken).value);
-			qbe_write_datum(qbe, datum);
-			qbe_write(qbe, format("ret {}", qbe_show_reg(datum.reg)))!;
+			const value = (token as *ReturnToken).value;
+			const datum = qbe_define_datum(qbe, value);
+			const result = qbe_write_datum(qbe, datum);
+			qbe_write(qbe, format("ret {}", result))!;
+
 		};
 		if (token is *FuncallToken) {
 			qbe_write_funcall(qbe, *(token as *FuncallToken));
@@ -768,7 +852,15 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 	// };
 };
 
-fn qbe_write_datum(qbe: *Qbe, datum: Qbe_Variable) void = {
+fn qbe_write_datum(qbe: *Qbe, datum: (Qbe_Variable | Qbe_Literal)) str = {
+	// Handle literals
+	if (datum is Qbe_Literal) {
+		const literal = datum as Qbe_Literal;
+		return strings::sub(literal.text, 2);
+	};
+
+	const datum = datum as Qbe_Variable;
+	// Handle full-blown datums
 	if (!datum.is_emitted && datum.text is str) {
 		// Prepend for data strings, append for all else
 		if (datum.reg.kind == Qbe_IdentifierKind::DATA) {
@@ -777,7 +869,12 @@ fn qbe_write_datum(qbe: *Qbe, datum: Qbe_Variable) void = {
 			qbe_write_noindent(qbe, datum.text as str, Qbe_WritePositionKind::APPEND)!;
 		};
 		datum.is_emitted = true;
+
+		return qbe_show_reg(datum.reg);
 	};
+
+
+	return datum.text as str;
 };
 
 fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
@@ -789,61 +886,55 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		const expr1alloc = qbe_define_datum(qbe, expr1);
 		const expr2alloc = qbe_define_datum(qbe, expr2);
 		qbe_write(qbe, "# if's datums")!;
-		qbe_write_datum(qbe, expr1alloc);
-		qbe_write_datum(qbe, expr2alloc);
+		const cmp1text = qbe_write_datum(qbe, expr1alloc);
+		const cmp2text = qbe_write_datum(qbe, expr2alloc);
 		qbe_write(qbe, "# end")!;
 
-		let cmpreg1: Qbe_Identifier = @undefined;
-		let cmpreg2: Qbe_Identifier = @undefined;
-
-		if (expr1alloc.kind != expr2alloc.kind) {
+		if (get_datum_kind(expr1alloc) != get_datum_kind(expr2alloc)) {
 			fmt::fatal("TYPE_ERROR: cannot compare different data types");
 		};
 
 		// Guaranteed to be same after ^
-		const data_kind = expr1alloc.kind;
-
-		cmpreg1 = expr1alloc.reg;
-		cmpreg2 = expr2alloc.reg;
+		const data_kind = get_datum_kind(expr1alloc);
 
 		switch (cmp) {
 		case "==" =>
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR =>
-				qbe_write(qbe, format("%eql  =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql  =l call $strcmp(l {}, l {})", cmp1text, cmp2text))!;
 			case Qbe_VariableDataKind::INT =>
-				qbe_write(qbe, format("%eql =l ceql {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l ceql {}, {}", cmp1text, cmp2text))!;
 			};
 		case "!=" =>
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR =>
-				qbe_write(qbe, format("%eql =l call $strcmp(l {}, l {})", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l call $strcmp(l {}, l {})", cmp1text, cmp2text))!;
 			case Qbe_VariableDataKind::INT =>
-				qbe_write(qbe, format("%eql =l cnel {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l cnel {}, {}", cmp1text, cmp2text))!;
 			};
 		case "<" =>
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by LT", linenum());
 			case Qbe_VariableDataKind::INT =>
-				qbe_write(qbe, format("%eql =l cslel {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l cslel {}, {}", cmp1text, cmp2text))!;
 			};
 		case "<=" =>
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by LTE", linenum());
 			case Qbe_VariableDataKind::INT =>
-				qbe_write(qbe, format("%eql =l csltl {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l csltl {}, {}", cmp1text, cmp2text))!;
 			};
 		case ">" =>
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by GT", linenum());
 			case Qbe_VariableDataKind::INT =>
-				qbe_write(qbe, format("%eql =l csgel {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l csgel {}, {}", cmp1text, cmp2text))!;
 			};
 		case ">=" =>
 			switch (data_kind) {
 			case Qbe_VariableDataKind::STR => fmt::fatalf("line {}: Cannot compare strings by GTE", linenum());
 			case Qbe_VariableDataKind::INT =>
-				qbe_write(qbe, format("%eql =l csgtl {}, {}", qbe_show_reg(cmpreg1), qbe_show_reg(cmpreg2)))!;
+				qbe_write(qbe, format("%eql =l csgtl {}, {}", cmp1text, cmp2text))!;
 			};
 		case => panic(format("Unsupported operator: {}", cmp))!;
 		};

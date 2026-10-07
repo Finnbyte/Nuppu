@@ -15,17 +15,19 @@ use regex;
 use strings;
 use os;
 
-type PPImportToken = struct { 
-	value: str
-};
-
 type ReturnToken = struct {
-	value: AnyExpression
+	value: AnyExpression,
+	linenum: int
 };
 
 type FuncallToken = struct {
 	name: str,
+	linenum: int,
 	arguments: *ExprTree,
+};
+
+type ArrayExpression = struct {
+	values: *ExprTree,
 };
 
 type BlockToken = struct {
@@ -35,11 +37,13 @@ type BlockToken = struct {
 };
 
 type LabelToken = struct {
-	name: str
+	name: str,
+	linenum: int
 };
 
 type GoToken = struct {
-	label: str
+	label: str,
+	linenum: int
 };
 
 type invalidexpression = !void;
@@ -53,6 +57,7 @@ type ParameterToken = struct {
 
 type FunDefToken = struct {
 	name: str,
+	linenum: int,
 	return_type: (ExpressionKind | NoneType),
 	proc: *FunDefProcToken,
 	body: *BlockToken
@@ -64,6 +69,7 @@ type FunDefProcToken = struct {
 };
 
 type IfToken = struct {
+	linenum: int,
 	tree: *CondTree,
 	body: *BlockToken
 };
@@ -71,8 +77,8 @@ type IfToken = struct {
 type Token = (*VariableToken | *FuncallToken | *IfToken | *FunDefToken | *ReturnToken | *LabelToken | *GoToken);
 
 type VariableToken = struct {
-	kind: VariableKind,
 	name: str,
+	linenum: int,
 	value: AnyExpression
 };
 
@@ -80,7 +86,7 @@ type Tokenizer = struct {
 	block: (*BlockToken | void),
 	tokens: []Token,
 	buffer: []LexSymbol,
-	linenum: int,
+	linenum: int
 };
 
 type BlockKind = enum {
@@ -95,9 +101,11 @@ type ExpressionKind = enum {
 	STR
 };
 
+const COMMENT = "//";
+
 fn valid_integer(s: str) bool = {
 	for (const ch .. strings::torunes(s)!) {
-		if (!ascii::isdigit(ch)) return false;
+		if (!ascii::isdigit(ch) && ch != '+' && ch != '-' && ch != '*' && ch != ' ' && ch != '/') return false;
 	};
 	return true;
 };
@@ -219,14 +227,26 @@ type VariableExpression = struct {
 	var: (str | void)
 };
 
-type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression);
+type AnyExpression = (*Expression | *VariableExpression | *FunctionExpression | *ArrayExpression);
 
 fn peek_next(tokenizer: *Tokenizer) LexSymbol = {
 	return tokenizer.buffer[0];
 };
 
+fn peek_line(tokenizer: *Tokenizer) str = {
+	const output: []rune = [];
+	for (const symbol .. tokenizer.buffer) {
+		if (symbol.kind == LexKind::NEWLINE) break;
+		append(output, symbol.value)!;
+	};
+	fmt::println("peek line output:", strings::fromrunes(output)!)!;
+	return strings::fromrunes(output)!;
+};
+
 fn next(tokenizer: *Tokenizer) LexSymbol = {
 	const symbol = tokenizer.buffer[0];
+	const kind = tokenizer.buffer[0].kind;
+	if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 	delete(tokenizer.buffer[0]);
 	return symbol;
 };
@@ -248,7 +268,7 @@ fn initiate_block_token(kind: BlockKind, fun_name: (str | void) = void) *BlockTo
 	})!;
 };
 
-fn init_blockwise_tokenizer(symbols: []LexSymbol, block: *BlockToken) Tokenizer = {
+fn init_blockwise_tokenizer(symbols: []LexSymbol, block: *BlockToken, begin_linenum: int) Tokenizer = {
 	const symbols_clone: []LexSymbol = [];
 	for (const symbol .. symbols) {
 		append(symbols_clone, symbol)!;
@@ -256,7 +276,7 @@ fn init_blockwise_tokenizer(symbols: []LexSymbol, block: *BlockToken) Tokenizer 
 	return Tokenizer {
 		tokens = [],
 		buffer = symbols_clone,
-		linenum = 1,
+		linenum = begin_linenum,
 		block = block
 	};
 };
@@ -322,6 +342,8 @@ fn tokenizer_parse_if_node(tokenizer: *Tokenizer) *IfCondNode = {
 };
 
 fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
+	const linenum = tokenizer.linenum;
+
 	const tree = alloc(CondTree {
 		head = null
 	})!;
@@ -364,20 +386,19 @@ fn tokenizer_parse_if(tokenizer: *Tokenizer) void = {
 		};
 	};
 
-	fmt::println("hmm", expression_to_str(((tree.head: *LinkedListNode).value: *IfCondNode).expr1))!;
-
 	const block = initiate_block_token(BlockKind::IF);
-	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
+	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block, linenum + 1);
 	tokenizer_parse_block(&blockwise_tokenizer);
 	block.tokens = blockwise_tokenizer.tokens;
 	tokenizer.buffer = blockwise_tokenizer.buffer;
 
 	append(tokenizer.tokens, alloc(IfToken {
 		tree = tree,
-		body = block
+		body = block,
+		linenum = linenum
 	})!)!;
 
-	// Go ahead to avoid retokenizing from nested if tokenizer
+	// Go ahjead to avoid retokenizing from nested if tokenizer
 	for (let i = 0z; i < 4; i+= 1) {
 		next(tokenizer);
 	};
@@ -418,16 +439,18 @@ fn skip_empty(tokenizer: *Tokenizer) size = {
 };
 
 fn tokenizer_parse_type(tokenizer: *Tokenizer) (ExpressionKind | NoneType) = {
-	const return_type: (ExpressionKind | NoneType) = switch (next_till_nonchar(tokenizer)) {
-	case "int" => yield ExpressionKind::INT;
-	case "str" => yield ExpressionKind::STR;
-	case "none" => yield NoneType;
+	switch (next_till_nonchar(tokenizer)) {
+	case "int" => return ExpressionKind::INT;
+	case "str" => return ExpressionKind::STR;
+	case "none" => return NoneType;
 	case => fmt::fatalf("UNRECOGNIZED TYPE");
 	};
 };
 
 fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	const fun_name = next_till_nonchar_or_nondigit(tokenizer);
+	const linenum = tokenizer.linenum;
+	fmt::println(fun_name, linenum)!;
 
 	if (peek_next(tokenizer).kind == LexKind::WHITESPACE) next(tokenizer);
 
@@ -452,14 +475,13 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 	const return_type = tokenizer_parse_type(tokenizer);
 	next_expect(tokenizer, LexKind::WHITESPACE);
 
-	next_expect_rune(tokenizer, 'i');
-	next_expect_rune(tokenizer, 's');
+	next_expect(tokenizer, LexKind::EQUALS);
 
 	next_expect(tokenizer, LexKind::NEWLINE);
-	incr_linenum();
+	incr_linenum(tokenizer);
 
 	const block = initiate_block_token(BlockKind::FUN, fun_name);
-	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block);
+	const blockwise_tokenizer = init_blockwise_tokenizer(tokenizer.buffer, block, linenum + 1);
 
 	const fundef_token = alloc(FunDefToken {
 		name = fun_name,
@@ -468,10 +490,11 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 			name = fun_name,
 			parameters = parameters
 		})!,
-		body = block
+		body = block,
+		linenum = linenum
 	})!;
 
-	append(blockwise_tokenizer.tokens, fundef_token)!;
+	// append(blockwise_tokenizer.tokens, fundef_token)!;
 
 	tokenizer_parse_block(&blockwise_tokenizer);
 
@@ -490,6 +513,13 @@ fn tokenizer_parse_fun(tokenizer: *Tokenizer) void = {
 fn tokenizer_parse_buffer(tokenizer: *Tokenizer) void = {
 	for (tokenizer_has_next_statement(*tokenizer)) {
 		const keyword = next_till_nonchar(tokenizer);
+
+		// Skip comments
+		if (strings::hasprefix(keyword, COMMENT)) {
+			next_till_kind(tokenizer, LexKind::NEWLINE);
+			next(tokenizer);
+			continue;
+		};
 		if (len(keyword) == 0) next(tokenizer);
 
 		// only allow function definitions for now
@@ -501,12 +531,17 @@ fn tokenizer_parse_buffer(tokenizer: *Tokenizer) void = {
 };
 
 fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identifier: str) void = {
+	const linenum = tokenizer.linenum;
+
 	if (!tokenizer_is_valid_variable(identifier)) {
 		fmt::fatalf("TOKENIZER_ERROR: invalid identifier name given: \"{}\"", identifier);
 	};
 
+	let explicit_value_type: (ExpressionKind | NoneType | void) = void;
 	if (peek_next(tokenizer).kind == LexKind::COLON) {
-		unimplemented("EXPLICIT TYPE HANDLING");
+		next(tokenizer);
+		skip_empty(tokenizer);
+		explicit_value_type = tokenizer_parse_type(tokenizer);
 	};
 
 	skip_empty(tokenizer);
@@ -518,12 +553,11 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 		skip_empty(tokenizer);
 
 		const value = tokenizer_parse_expression(tokenizer);
-		const value_type = find_return_type(value);
 
 		append(tokenizer.tokens, alloc(VariableToken {
 			name = identifier,
 			value = value,
-			kind = value_type
+			linenum = tokenizer.linenum
 		})!)!;
 
 	case LexKind::EQUALS => 
@@ -532,43 +566,51 @@ fn tokenizer_parse_variable_declaration_or_assign(tokenizer: *Tokenizer, identif
 		const value = tokenizer_parse_expression(tokenizer);
 
 		let kind: VariableKind = @undefined;
-		for (const token .. tokenizer.tokens) {
-			if (token is *VariableToken) {
-				const var = token as *VariableToken;
-				if (var.name == identifier) {
-					kind = var.kind;
-				};
-			};
-		};
+		// for (const token .. tokenizer.tokens) {
+		// 	if (token is *VariableToken) {
+		// 		const var = token as *VariableToken;
+		// 		if (var.name == identifier) {
+		// 		};
+		// 	};
+		// };
 
 		append(tokenizer.tokens, alloc(VariableToken {
 			name = identifier,
 			value = value,
-			kind = kind
+			linenum = tokenizer.linenum
 		})!)!;
-	case => fmt::fatalf("line {}: TOKENIZER_ERROR: invalid statement", linenum());
+	case => fmt::fatalf("line {}: TOKENIZER_ERROR: invalid statement", tokenizer.linenum);
 	};
 };
 
 fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
+	const block_begin_linenum = tokenizer.linenum;
 	const is_blockwise_tokenizer = !(tokenizer.block is void);
 	const symbols = tokenizer.buffer;
 	const symbols_count = len(tokenizer.buffer);
 	for (!tokenizer_should_stop(tokenizer)) {
 		// could not find end before buffer ran out
 		if (len(tokenizer.buffer) < 3) {
-			fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as *BlockToken).id);
+			fmt::fatalf("TOKENIZER_ERROR: could not find end to block beginning at line {}", block_begin_linenum);
 		};
 
 		// label
 		if (peek_next(tokenizer).kind == LexKind::COLON) {
 			next(tokenizer);
 			const name = next_till_nonchar_or_nondigit(tokenizer);
-			append(tokenizer.tokens, alloc(LabelToken { name = name })!)!;
+			append(tokenizer.tokens, alloc(LabelToken { name = name, linenum = tokenizer.linenum })!)!;
 			next(tokenizer);
 		};
 
 		const keyword = next_till_nonchar_or_nondigit(tokenizer);
+
+		// Skip comments
+		if (strings::hasprefix(keyword, COMMENT)) {
+			next_till_kind(tokenizer, LexKind::NEWLINE);
+			next(tokenizer);
+			continue;
+		};
+
 		if (len(keyword) == 0) next(tokenizer);
 
 		// end closes block
@@ -580,7 +622,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 			fmt::fatalf("TOKENIZER_ERROR: {}: illegal \"end\" in non-scoped code", globalTokenizer.linenum);
 		};
 
-		fmt::println(keyword)!;
+		fmt::printfln("keyword is: '{}'", keyword)!;
 
 		// Check keyword
 		if (peek_next(tokenizer).kind == LexKind::PAREN_OPEN) {
@@ -588,7 +630,7 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 		} else if (keyword == "go") {
 			next_expect(tokenizer, LexKind::WHITESPACE);
 			const label_name = next_till_nonchar_or_nondigit(tokenizer);
-			append(tokenizer.tokens, alloc(GoToken { label = label_name })!)!;
+			append(tokenizer.tokens, alloc(GoToken { label = label_name, linenum = tokenizer.linenum })!)!;
 		} else if (keyword == "fun") {
 			skip_empty(tokenizer);
 			tokenizer_parse_fun(tokenizer);
@@ -598,21 +640,21 @@ fn tokenizer_parse_block(tokenizer: *Tokenizer) void = {
 			skip_empty(tokenizer);
 			// Return with nothing after it => void
 			if (peek_next(tokenizer).kind == LexKind::NEWLINE) {
-				append(tokenizer.tokens, alloc(ReturnToken { value = create_expr(strings::toutf8("0"), ExpressionKind::INT) })!)!;
+				append(tokenizer.tokens, alloc(ReturnToken { value = create_expr(strings::toutf8("0"), ExpressionKind::INT), linenum = tokenizer.linenum })!)!;
 			} else {
 				const value = tokenizer_parse_expression(tokenizer);
-				append(tokenizer.tokens, alloc(ReturnToken { value = value })!)!;
+				append(tokenizer.tokens, alloc(ReturnToken { value = value, linenum = tokenizer.linenum })!)!;
 			};
 		} else if (keyword != "") {
 			tokenizer_parse_variable_declaration_or_assign(tokenizer, keyword);
 		};
 
 		// increment internal linenum counter if was new line
-		if (peek_next(tokenizer).kind == LexKind::NEWLINE) incr_linenum();
+		if (peek_next(tokenizer).kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 	};
 
 	if (len(tokenizer.buffer) < 3) {
-		fmt::fatalf("TOKENIZER_ERROR: {}: could not find end to the block. Id: {}", globalTokenizer.linenum, (tokenizer.block as *BlockToken).id);
+		fmt::fatalf("TOKENIZER_ERROR: could not find end to block beginning at line {}", block_begin_linenum);
 	};
 };
 
@@ -621,6 +663,8 @@ fn next_expect(tokenizer: *Tokenizer, expected_kind: LexKind, index: size = 0) v
 		const actual_kind = tokenizer.buffer[index].kind;
 		panic(format("{}: Expected '{}', got '{}'", linenum(), lexkind_to_rune(expected_kind), lexkind_to_rune(actual_kind)))!;
 	} else {
+		const kind = tokenizer.buffer[0].kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		delete(tokenizer.buffer[0]);
 	};
 };
@@ -631,6 +675,8 @@ fn next_expect_rune(tokenizer: *Tokenizer, expected_rune: rune, index: size = 0)
 		const actual_rune = tokenizer.buffer[index].value;
 		fmt::fatalf("{}: Expected '{}', got '{}'", tokenizer.linenum, expected_rune, actual_rune);
 	} else {
+		const kind = tokenizer.buffer[0].kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		delete(tokenizer.buffer[0]);
 	};
 };
@@ -638,6 +684,8 @@ fn next_expect_rune(tokenizer: *Tokenizer, expected_rune: rune, index: size = 0)
 fn next_till_whitespace(tokenizer: *Tokenizer) str = {
 	const buf: []rune = [];
 	for (tokenizer.buffer[0].value != ' ' && tokenizer.buffer[0].value != '\n') {
+		const kind = tokenizer.buffer[0].kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		const c: rune = tokenizer.buffer[0].value;
 		append(buf, c)!;
 		delete(tokenizer.buffer[0]);
@@ -648,6 +696,8 @@ fn next_till_whitespace(tokenizer: *Tokenizer) str = {
 fn next_till_char(tokenizer: *Tokenizer, char: rune) str = {
 	const buf: []rune = [];
 	for (tokenizer.buffer[0].value != char) {
+		const kind = tokenizer.buffer[0].kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		const c: rune = tokenizer.buffer[0].value;
 		append(buf, c)!;
 		delete(tokenizer.buffer[0]);
@@ -658,6 +708,8 @@ fn next_till_char(tokenizer: *Tokenizer, char: rune) str = {
 fn next_till_nonchar_or_nondigit(tokenizer: *Tokenizer) str = {
 	const buf: []rune = [];
 	for (tokenizer.buffer[0].kind == LexKind::CHAR || tokenizer.buffer[0].kind == LexKind::DIGIT) {
+		const kind = tokenizer.buffer[0].kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		const c: rune = tokenizer.buffer[0].value;
 		append(buf, c)!;
 		delete(tokenizer.buffer[0]);
@@ -666,8 +718,8 @@ fn next_till_nonchar_or_nondigit(tokenizer: *Tokenizer) str = {
 
 };
 
-fn incr_linenum() void = {
-	globalTokenizer.linenum += 1;
+fn incr_linenum(tokenizer: *Tokenizer) void = {
+	tokenizer.linenum += 1;
 };
 
 fn next_till_kind(tokenizer: *Tokenizer, kinds: LexKind...) str = {
@@ -680,6 +732,8 @@ fn next_till_kind(tokenizer: *Tokenizer, kinds: LexKind...) str = {
 			};
 		};
 		if (should_break) break;
+		const kind = tokenizer.buffer[0].kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		const c: rune = tokenizer.buffer[0].value;
 		append(buf, c)!;
 		delete(tokenizer.buffer[0]);
@@ -732,7 +786,8 @@ fn tokenizer_parse_funcall_args(tokenizer: *Tokenizer) *ExprTree = {
 	const tree = create_expr_tree();
 
 	for (peek_next(tokenizer).kind != LexKind::PAREN_CLOSE) {
-		const value = tokenizer_parse_expression(tokenizer);
+		const value = tokenizer_parse_expression(tokenizer, ParseExpressionContext::ARG);
+		fmt::println("OKEI", expression_to_str(value))!;
 		ll_push(tree: *LinkedList, create_expr_node(value));
 
 		if (peek_next(tokenizer).kind == LexKind::COMMA) {
@@ -754,26 +809,54 @@ fn tokenizer_parse_funcall(tokenizer: *Tokenizer, func_name: str) void = {
 	append(tokenizer.tokens, alloc(FuncallToken {
 		name = func_name,
 		arguments = arguments,
+		linenum = tokenizer.linenum
 	})!)!;
 };
 
-fn tokenizer_parse_expression(tokenizer: *Tokenizer) (*Expression | *VariableExpression | *FunctionExpression) = {
+type ParseExpressionContext = enum {
+	ARG,
+	NONARG
+};
+
+fn tokenizer_parse_expression(tokenizer: *Tokenizer, context: ParseExpressionContext = ParseExpressionContext::NONARG) AnyExpression = {
 	// is it string literal?
 	if (peek_next(tokenizer).kind == LexKind::QUOTE) {
 		next(tokenizer);
-		const value = next_till_kind(tokenizer, LexKind::QUOTE);
+		const raw_value = next_till_kind(tokenizer, LexKind::QUOTE);
 		next(tokenizer);
 		return alloc(Expression {
 			kind = ExpressionKind::STR,
-			value = strings::toutf8(value),
-			value_size = len(value),
+			value = strings::toutf8(raw_value),
+			value_size = len(raw_value),
 		})!;
+	};
+
+	// is it array?
+	if (peek_next(tokenizer).kind == LexKind::BRACKET_OPEN) {
+		next(tokenizer);
+		const expr_tree = create_expr_tree();
+		const array = alloc(ArrayExpression {
+			values = expr_tree
+		})!;
+		for (peek_next(tokenizer).kind != LexKind::BRACKET_CLOSE) {
+			if (peek_next(tokenizer).kind == LexKind::COMMA) next(tokenizer);
+			skip_empty(tokenizer);
+			const value = tokenizer_parse_expression(tokenizer);
+			ll_push(array.values: *LinkedList, create_expr_node(value));
+		};
+
+		// Go next from PAREN_CLOSE
+		next(tokenizer);
+
+		return array;
 	};
 
 	const raw_value = next_till_nonchar_or_nondigit(tokenizer);
 
 	// is it a number literal?
 	if (valid_integer(raw_value)) {
+		// For parsing actual math lines:
+		// const raw_value = next_till_kind(tokenizer, LexKind::NEWLINE);
 		return alloc(Expression {
 			kind = ExpressionKind::INT,
 			value = strings::toutf8(raw_value),
@@ -813,6 +896,7 @@ fn tokenizer_parse_expression(tokenizer: *Tokenizer) (*Expression | *VariableExp
 		return function_expression;
 	};
 
+	fmt::println("hm?",raw_value)!;
 	return fmt::fatal("Invalid expression");
 
 };
@@ -826,13 +910,6 @@ fn tokenizer_is_valid_variable(identifier: str) bool = {
 	const is_valid_variable = identifier_runes[0] == '_' || ascii::isalpha(identifier_runes[0]);
 	fmt::println("is valid", is_valid_variable, identifier)!;
 	return is_valid_variable;
-};
-
-fn find_return_type(some_expr: AnyExpression) ExpressionKind = {
-	match (some_expr) {
-	case let expr: *Expression =>
-		return expr.kind;
-	};
 };
 
 // Returns whether there are still statements to be tokenized in the source file buffer.
@@ -933,6 +1010,8 @@ fn next_till_keyword(tokenizer: *Tokenizer, keyword: str) (str | void) = {
 	const keyword_runes = strings::torunes(keyword)!;
 	let index = 0z;
 	for (index < (len(buffer) - len(keyword))) {
+		const kind = peek_next(tokenizer).kind;
+		if (kind == LexKind::NEWLINE) incr_linenum(tokenizer);
 		append(buf, next(tokenizer).value)!;
 
 		// has even chance of containing the keyword
