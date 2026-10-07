@@ -83,8 +83,8 @@ fun drop(array_begin_addr: int, array_length: int, count: int) -> int =
 	aligned_length := __to_aligned(array_length)
 	dest_list := malloc(aligned_length)
 	memcpy(dest_list, array_begin_addr, aligned_length)
-	dest_list = add(dest_list, __to_aligned(count))
-	return dest_list
+	dest_list2 := add(dest_list, __to_aligned(count))
+	return dest_list2
 end
 
 fun range(start: int, end: int) -> int =

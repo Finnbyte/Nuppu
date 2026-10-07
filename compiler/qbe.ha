@@ -27,6 +27,28 @@ use os;
 let ifi = 0;
 let whilei = 0;
 
+type Qbe_Values = hashmap;
+
+fn clone_qbe(qbe: Qbe) *Qbe = {
+	const new_write_seq: []str = [];
+	if (qbe.write_seq is []str) {
+		const write_seq = qbe.write_seq as []str;
+		for (const s .. write_seq) {
+			append(new_write_seq, s)!;
+		};
+	};
+	const new_qbe = alloc(Qbe {
+	write_seq = new_write_seq,
+	indent_level = qbe.indent_level,
+	context = qbe.context,
+	buffer = qbe.buffer,
+	scopes = qbe.scopes,
+	scope = qbe.scope
+	})!;
+	return new_qbe;
+};
+
+
 fn clone_qbe_variable(variable: Qbe_Variable) Qbe_Variable = {
 	const var = Qbe_Variable {
 		reg = clone_qbe_reg(variable.reg),
@@ -166,9 +188,6 @@ fn qbe_initialize(base_file_path: str) Qbe = {
 		scope = initial_scope
 	};
 
-	// Set initial scope data
-	append(qbe.scopes, initial_scope)!;
-
 	for (const line .. lines) {
 		qbe_write(&qbe, line)!;
 	};
@@ -236,14 +255,13 @@ fn qbe_set_indent(qbe: *Qbe, indent_level: size) void = {
 };
 
 fn qbe_write_seq_begin(qbe: *Qbe) void = {
-	qbe.write_seq = [];
+	const write_seq: []str = [];
+	qbe.write_seq = write_seq;
 	return;
 };
 
 fn qbe_write_seq_finish(qbe: *Qbe, write_to_buffer: bool = true) str = {
-	assert(qbe.write_seq is []str);
-
-	const write_seq = qbe.write_seq as []str;
+	const write_seq = qbe.write_seq: []str;
 	for (const s .. write_seq) {
 		fmt::println(s)!;
 	};
@@ -371,8 +389,6 @@ fn qbe_define_literal_str(qbe: *Qbe, name: str, expression: *Expression, src_ide
 		is_emitted = false
 	};
 
-	qbe_add_global_data(qbe, var);
-
 	return var;
 };
 
@@ -385,17 +401,6 @@ fn qbe_define_expression(data_label: str, expression: Expression) str = {
 		return fmt::asprintf("l {}", data_label)!;
 	};
 };
-
-// fn qbe_define_store(reg: str, data_sz: size, data: []u8, data_kind: Qbe_VariableDataKind) str = {
-// 	const elems = data_sz / ALIGNMENT;
-// 	if (elems == 1 && data_kind = Qbe_VariableDataKind::INT) {
-// 		append(out, format("storel {}, ,", reg))!;
-// 	} else if (elems > 1 && data_kind = Qbe_VariableDataKind::STR) {
-// 		append(out, format("storel {}, ,", reg))!;
-// 	};
-// };
-//
-//
 
 fn figure_malloc_size(data_sz: size, data_kind: Qbe_VariableDataKind) str = {
 	switch (data_kind) {
@@ -465,11 +470,6 @@ fn qbe_define_allocation(qbe: *Qbe, data_sz: size, data: []u8, data_kind: Qbe_Va
 };
 
 fn qbe_write_variable(qbe: *Qbe, token: VariableToken) void = {
-	// const datum = match (token.value) {
-	// 	case let expr: *Expression => yield qbe_define_datum(qbe, token.value);	
-	// 	case let expr: *VariableExpression => yield qbe_define_datum(qbe, token.value, token.name);	
-	// 	case let expr: *FunctionExpression => yield qbe_define_datum(qbe, token.value, token.name);	
-	// };
 	const datum = qbe_define_datum(qbe, token.value, token.name);
 	const reg = qbe_get_reg_label(false, token.name);
 	if (datum is Qbe_Literal) {
@@ -515,22 +515,12 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 		const allocation = qbe_define_allocation(qbe, value_size, value, kind, src_identifier);
 		return allocation;
 	case let expr: *FunctionExpression => 
-		// fmt::println("triyng to find", src_identifier)!;
-		// const reg = match (src_identifier) {
-		// case let identifier: str => yield match(qbe_scope_find_var_by_src_var(qbe, identifier)) {
-		// 	case let var: Qbe_Variable => yield var.reg;
-		// 	case void => yield qbe_get_reg_label(false, src_identifier);
-		// };
-		// case void => yield qbe_get_reg_label(false, src_identifier);
-		// };
 		const reg = qbe_get_reg_label(false, src_identifier);
-		qbe_write_seq_begin(qbe);
-		fmt::println("eka", qbe.write_seq is []str)!;
-		qbe_write(qbe, format("{} =l ", qbe_show_reg(reg)))!;
-		fmt::println("toka", qbe.write_seq is []str)!;
-		qbe_write_funcall(qbe, expr.name, expr.arguments);
-		fmt::println("kolmas", qbe.write_seq is []str)!;
-		const text = qbe_write_seq_finish(qbe, false);
+		const q = clone_qbe(*qbe);
+		qbe_write_seq_begin(q);
+		qbe_write(q, format("{} =l ", qbe_show_reg(reg)))!;
+		qbe_write_funcall(q, expr.name, expr.arguments);
+		const text = qbe_write_seq_finish(q, false);
 		fmt::println("text that shi", text)!;
 		const var = Qbe_Variable {
 			reg = reg,
@@ -590,8 +580,8 @@ fn qbe_define_datum(qbe: *Qbe, expr: AnyExpression, src_identifier: (str | void)
 
 		let node = ll_head(expr.values: *LinkedList);
 		if (node != null) {
-			const value = (node.value: *ExprTreeNode).value;
 			// add first value
+			const value = (node.value: *ExprTreeNode).value;
 			append(output, format("storel {}, {}", expression_to_str(value), qbe_show_reg(reg)))!;
 			node = node.next: *LinkedListNode;
 
@@ -665,20 +655,6 @@ fn qbe_regs_are_equal(reg1: Qbe_Identifier, reg2: Qbe_Identifier) bool = {
 	return qbe_show_reg(reg1) == qbe_show_reg(reg2);
 };
 
-fn qbe_scope_find_var_by_reg(qbe: *Qbe, reg_to_find: Qbe_Identifier) (Qbe_Variable | void)  = {
-	for (const scope .. qbe.scopes) {
-		if (len(scope.variables) < 1) continue;
-		for (let i = len(scope.variables) - 1; i >= 0 && i < len(scope.variables); i -= 1) {
-			const variable = scope.variables[i];
-			if (qbe_regs_are_equal(variable.reg, reg_to_find)) {
-				return variable;
-			};
-		};
-	};
-
-	return void;
-};
-
 fn qbe_globals_find_var_by_val(qbe: *Qbe, value_to_find: []u8) (Qbe_Variable | void)  = {
 	for (const scope .. qbe.scopes) {
 		if (len(scope.variables) < 1) continue;
@@ -705,18 +681,28 @@ fn qbe_globals_find_var_by_val(qbe: *Qbe, value_to_find: []u8) (Qbe_Variable | v
 	return void;
 };
 
-fn qbe_scope_find_var_by_src_var(qbe: *Qbe, src_var_to_find: str) (Qbe_Variable | void) = {
-	for (const scope .. qbe.scopes) {
-		if (len(scope.variables) < 1) continue;
-		for (let i = len(scope.variables) - 1; i >= 0 && i < len(scope.variables); i -= 1) {
-			const variable = scope.variables[i];
-			fmt::println("iterated:", variable.src_variable, src_var_to_find)!;
-			if (variable.src_variable is str && (variable.src_variable as str) == src_var_to_find) {
-				return variable;
+fn qbe_extract_values(qbe: *Qbe, expr: AnyExpression) Qbe_Values = {
+	const map = new_hashmap();
+
+	match (expr) {
+	case let expr: *FunctionExpression =>
+		let node = ll_head(expr.arguments: *LinkedList);
+		for (node != null) {
+			const value = (node.value: *ExprTreeNode).value;
+			match (value) {
+			case let value: *FunctionExpression =>
+				fmt::println("is fun expr")!;
+				const map_key = expr.name;
+				const map_value = format(".{}-{}-{}-{}", map_key, gen_id(), value.name, gen_id());
+				set(&map, map_key, map_value);
+			case => pass();
 			};
+			node = node.next: *LinkedListNode;
 		};
+	case => pass();
 	};
-	return void;
+	
+	return map;
 };
 
 fn qbe_write_funcall(qbe: *Qbe, name: str, arguments: *ExprTree) void = {
@@ -751,12 +737,21 @@ fn qbe_write_funcall(qbe: *Qbe, name: str, arguments: *ExprTree) void = {
 				};
 
 			case let arg: *FunctionExpression => 
-				const datum = qbe_define_datum(qbe, arg, arg.name);
-				qbe_write_datum(qbe, datum);
-				match (datum) {
-				case let datum: Qbe_Variable => append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
-				case => pass();
-				};
+				// Should have some system to delivering values
+				// into here.
+				// Because otherwise there is race condition.
+				//
+				fmt::println(arg.name)!;
+				fmt::println("no lul")!;
+				const values = qbe_extract_values(qbe, arg);
+				fmt::println("displaying hash map")!;
+				display_hashmap(values);
+				// const datum = qbe_define_datum(qbe, arg, format(".{}_ARG", name));
+				// qbe_write_datum(qbe, datum);
+				// match (datum) {
+				// append(call_args, format("l {}", qbe_show_reg(datum.reg)))!;
+				// case => pass();
+				// };
 				
 			case let arg: *VariableExpression => 
 				match (arg.reference) {
@@ -790,11 +785,6 @@ fn qbe_define_function_parameters(qbe: *Qbe, proc: FunDefProcToken) str = {
 	};
 
 	return join(out, ", ");
-};
-
-fn qbe_add_global_data(qbe: *Qbe, variable: Qbe_Variable) void = {
-	const scope = qbe.scopes[0];
-	append(scope.variables, clone_qbe_variable(variable))!;
 };
 
 fn qbe_write_function(qbe: *Qbe, token: FunDefToken) void = {
@@ -857,7 +847,7 @@ fn qbe_write_block(qbe: *Qbe, token: BlockToken) void = {
 	// };
 };
 
-fn qbe_write_datum(qbe: *Qbe, datum: (Qbe_Variable | Qbe_Literal), do_copy: bool = true) str = {
+fn qbe_write_datum(qbe: *Qbe, datum: (Qbe_Variable | Qbe_Literal), do_copy: bool = true, skip_write: bool = false) str = {
 	match (datum) {
 	case let d: Qbe_Literal => fmt::println("lit")!;
 	case let d: Qbe_Variable => fmt::println("var")!;
@@ -866,10 +856,14 @@ fn qbe_write_datum(qbe: *Qbe, datum: (Qbe_Variable | Qbe_Literal), do_copy: bool
 	if (datum is Qbe_Literal) {
 		const literal = datum as Qbe_Literal;
 		if (do_copy == true) {
-			qbe_write_noindent(qbe, strings::replace(literal.text, "=l ", "=l copy ")!, Qbe_WritePositionKind::APPEND)!;
+			if (!skip_write) {
+				qbe_write_noindent(qbe, strings::replace(literal.text, "=l ", "=l copy ")!, Qbe_WritePositionKind::APPEND)!;
+			};
 			return format("copy {}", strings::sub(literal.text, 2));
 		} else {
-			qbe_write_noindent(qbe, literal.text, Qbe_WritePositionKind::APPEND)!;
+			if (!skip_write) {
+				qbe_write_noindent(qbe, literal.text, Qbe_WritePositionKind::APPEND)!;
+			};
 			return format("{}", strings::sub(literal.text, 2));
 		};
 	};
@@ -972,8 +966,8 @@ fn qbe_write_if(qbe: *Qbe, token: IfToken) void = {
 		const expr1alloc = qbe_define_datum(qbe, expr1);
 		const expr2alloc = qbe_define_datum(qbe, expr2);
 		qbe_write(qbe, "# if's datums")!;
-		const cmp1text = qbe_write_datum(qbe, expr1alloc, false);
-		const cmp2text = qbe_write_datum(qbe, expr2alloc, false);
+		const cmp1text = qbe_write_datum(qbe, expr1alloc, false, true);
+		const cmp2text = qbe_write_datum(qbe, expr2alloc, false, true);
 		qbe_write(qbe, "# end")!;
 
 		if (get_datum_kind(expr1alloc) != get_datum_kind(expr2alloc)) {
