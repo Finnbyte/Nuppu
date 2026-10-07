@@ -19,12 +19,18 @@ if [ ! -f "$NUPPUC_PATH" ]; then
 fi
 
 compile() {
+	if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+			usage 0
+	fi
 	output_path="./$(basename "$1" ".nup")"
 	"$NUPPUPP_PATH" "$1" | "$NUPPUC_PATH" -o "$output_path" "-"
 	exit 0
 }
 
 compile_and_run() {
+	if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+			usage 0
+	fi
 	output_path="./$(basename "$1" ".nup")"
 	"$NUPPUPP_PATH" "$1" | "$NUPPUC_PATH" -o "$output_path" "-"
 	"$output_path"
@@ -39,3 +45,4 @@ INPUT_FILE_PATH=$2
 
 [ "$MODE" = "compile" ] && compile "$INPUT_FILE_PATH"
 [ "$MODE" = "run" ] && compile_and_run "$INPUT_FILE_PATH"
+usage 0
